@@ -1,15 +1,15 @@
 package com.example.baseboot;
 
-import com.example.baseboot.module.admin.dashboard.vo.DashboardOverviewVO;
-import com.example.baseboot.module.admin.dashboard.vo.DashboardTodosVO;
-import com.example.baseboot.module.admin.dashboard.vo.TopProductVO;
-import com.example.baseboot.module.admin.order.vo.OrderAdminDetailVO;
-import com.example.baseboot.module.admin.order.vo.OrderLogVO;
-import com.example.baseboot.module.admin.product.vo.StockWarningVO;
-import com.example.baseboot.module.admin.system.entity.SysAdminUser;
-import com.example.baseboot.module.admin.system.entity.SysRole;
-import com.example.baseboot.module.admin.system.vo.AdminUserVO;
-import com.example.baseboot.module.admin.system.vo.RoleVO;
+import com.example.baseboot.module.dashboard.vo.DashboardOverviewVO;
+import com.example.baseboot.module.dashboard.vo.DashboardTodosVO;
+import com.example.baseboot.module.dashboard.vo.TopProductVO;
+import com.example.baseboot.module.order.vo.OrderAdminDetailVO;
+import com.example.baseboot.module.order.vo.OrderLogVO;
+import com.example.baseboot.module.product.vo.StockWarningVO;
+import com.example.baseboot.module.system.entity.SysAdminUser;
+import com.example.baseboot.module.system.entity.SysRole;
+import com.example.baseboot.module.system.vo.AdminUserVO;
+import com.example.baseboot.module.system.vo.RoleVO;
 import com.example.baseboot.module.order.entity.Order;
 import com.example.baseboot.module.order.vo.OrderVO;
 import org.junit.jupiter.api.Assertions;
