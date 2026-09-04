@@ -9,6 +9,8 @@ import com.example.baseboot.module.product.spec.service.SpecKeyService;
 import com.example.baseboot.module.product.spec.service.SpecValueService;
 import com.example.baseboot.module.product.spec.vo.SpecKeyVO;
 import com.example.baseboot.module.product.spec.vo.SpecValueVO;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
@@ -18,6 +20,7 @@ import java.util.List;
 /**
  * 商品规格项与规格值管理控制器
  */
+@Tag(name = "10. 商品规格属性管理 (SpecController)", description = "规格项定义、分类绑定模板、规格值维护与批量录入")
 @RestController
 @RequestMapping("/api/spec")
 @RequiredArgsConstructor
@@ -33,6 +36,7 @@ public class SpecController {
     /**
      * 创建规格项 (支持附带初始规格值列表)
      */
+    @Operation(summary = "创建规格项", description = "新建规格属性项（如：颜色、尺码、内存），支持同时附带初始规格值集合")
     @PostMapping("/key")
     @LoginRequired
     public CommonResult<SpecKeyVO> createSpecKey(@Valid @RequestBody SpecKeyCreateDTO createDTO) {
@@ -43,6 +47,7 @@ public class SpecController {
     /**
      * 修改规格项
      */
+    @Operation(summary = "修改规格项", description = "修改规格项名称、所属分类与排序")
     @PutMapping("/key/{id}")
     @LoginRequired
     public CommonResult<SpecKeyVO> updateSpecKey(@PathVariable("id") Long id,
@@ -54,6 +59,7 @@ public class SpecController {
     /**
      * 删除规格项 (引用校验)
      */
+    @Operation(summary = "删除规格项", description = "删除规格项定义，若被已有商品规格引用则不可删除")
     @DeleteMapping("/key/{id}")
     @LoginRequired
     public CommonResult<Void> deleteSpecKey(@PathVariable("id") Long id) {
@@ -67,6 +73,7 @@ public class SpecController {
     /**
      * 获取规格项详情 (含规格值列表)
      */
+    @Operation(summary = "获取规格项详情", description = "按 ID 查询规格项并级联返回其下挂载的所有可用规格值列表")
     @GetMapping("/key/{id}")
     @PassToken
     public CommonResult<SpecKeyVO> getSpecKeyById(@PathVariable("id") Long id) {
@@ -77,6 +84,7 @@ public class SpecController {
     /**
      * 分页查询规格项列表
      */
+    @Operation(summary = "分页查询规格项列表", description = "支持按分类 ID、关键字及状态筛选规格项")
     @GetMapping("/key/page")
     @PassToken
     public CommonResult<CommonPage<SpecKeyVO>> pageSpecKeys(SpecKeyQueryDTO queryDTO) {
@@ -87,6 +95,7 @@ public class SpecController {
     /**
      * 根据分类 ID 查询该分类下所有可用的规格模板及可选值
      */
+    @Operation(summary = "按分类查询规格模板", description = "在商品发布或编辑页面，根据类目获取所推荐使用的标准规格项与可选规格值")
     @GetMapping("/category/{categoryId}")
     @PassToken
     public CommonResult<List<SpecKeyVO>> listSpecsByCategory(@PathVariable("categoryId") Long categoryId) {
@@ -97,6 +106,7 @@ public class SpecController {
     /**
      * 启用/禁用规格项
      */
+    @Operation(summary = "启用/禁用规格项", description = "切换规格项的可用状态")
     @PutMapping("/key/{id}/status")
     @LoginRequired
     public CommonResult<Void> updateKeyStatus(@PathVariable("id") Long id,
@@ -115,6 +125,7 @@ public class SpecController {
     /**
      * 新增单个规格值
      */
+    @Operation(summary = "新增单个规格值", description = "向指定规格项下追加单个可选规格值（如：黑色、XL）")
     @PostMapping("/value")
     @LoginRequired
     public CommonResult<SpecValueVO> createSpecValue(@Valid @RequestBody SpecValueCreateDTO createDTO) {
@@ -125,6 +136,7 @@ public class SpecController {
     /**
      * 批量新增规格值
      */
+    @Operation(summary = "批量新增规格值", description = "一次性向指定规格项批量录入多个规格取值")
     @PostMapping("/value/batch")
     @LoginRequired
     public CommonResult<List<SpecValueVO>> batchCreateSpecValues(@Valid @RequestBody SpecValueBatchDTO batchDTO) {
@@ -135,6 +147,7 @@ public class SpecController {
     /**
      * 修改规格值
      */
+    @Operation(summary = "修改规格值", description = "修改规格值的文字描述或展示顺序")
     @PutMapping("/value/{id}")
     @LoginRequired
     public CommonResult<SpecValueVO> updateSpecValue(@PathVariable("id") Long id,
@@ -146,6 +159,7 @@ public class SpecController {
     /**
      * 删除规格值 (引用校验)
      */
+    @Operation(summary = "删除规格值", description = "若规格值已被 SKU 引用则不可删除")
     @DeleteMapping("/value/{id}")
     @LoginRequired
     public CommonResult<Void> deleteSpecValue(@PathVariable("id") Long id) {
@@ -159,6 +173,7 @@ public class SpecController {
     /**
      * 获取单个规格值详情
      */
+    @Operation(summary = "获取单个规格值详情", description = "查询规格值详情及其所属规格项 ID")
     @GetMapping("/value/{id}")
     @PassToken
     public CommonResult<SpecValueVO> getSpecValueById(@PathVariable("id") Long id) {
@@ -169,6 +184,7 @@ public class SpecController {
     /**
      * 查询指定规格项下的所有规格值列表
      */
+    @Operation(summary = "查询规格项下的全部规格值", description = "按规格项 keyId 获取该项下的所有候选属性值清单")
     @GetMapping("/key/{keyId}/values")
     @PassToken
     public CommonResult<List<SpecValueVO>> listValuesBySpecKeyId(@PathVariable("keyId") Long keyId) {
@@ -179,6 +195,7 @@ public class SpecController {
     /**
      * 启用/禁用规格值
      */
+    @Operation(summary = "启用/禁用规格值", description = "切换规格值的可用性")
     @PutMapping("/value/{id}/status")
     @LoginRequired
     public CommonResult<Void> updateValueStatus(@PathVariable("id") Long id,

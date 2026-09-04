@@ -1,5 +1,6 @@
 package com.example.baseboot.common.api;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -12,6 +13,7 @@ import java.io.Serializable;
  *
  * @param <T> 响应数据类型
  */
+@Schema(description = "统一响应结果封装")
 @Data
 @Builder
 @NoArgsConstructor
@@ -23,21 +25,25 @@ public class CommonResult<T> implements Serializable {
     /**
      * 业务状态码
      */
+    @Schema(description = "业务状态码 (200 为成功)", example = "200")
     private long code;
 
     /**
      * 响应消息
      */
+    @Schema(description = "响应提示信息", example = "操作成功")
     private String message;
 
     /**
      * 响应数据
      */
+    @Schema(description = "响应数据负载主体")
     private T data;
 
     /**
      * 响应时间戳
      */
+    @Schema(description = "响应生成时间戳 (毫秒)", example = "1725450000000")
     @Builder.Default
     private long timestamp = System.currentTimeMillis();
 

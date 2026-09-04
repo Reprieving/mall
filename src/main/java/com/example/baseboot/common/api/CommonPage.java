@@ -1,6 +1,7 @@
 package com.example.baseboot.common.api;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
+import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -15,6 +16,7 @@ import java.util.List;
  *
  * @param <T> 数据列表元素类型
  */
+@Schema(description = "通用分页封装对象")
 @Data
 @Builder
 @NoArgsConstructor
@@ -26,26 +28,31 @@ public class CommonPage<T> implements Serializable {
     /**
      * 当前页码
      */
+    @Schema(description = "当前页码", example = "1")
     private Long pageNum;
 
     /**
      * 每页数量
      */
+    @Schema(description = "每页显示条数", example = "10")
     private Long pageSize;
 
     /**
      * 总记录数
      */
+    @Schema(description = "符合条件的总记录数", example = "88")
     private Long total;
 
     /**
      * 总页数
      */
+    @Schema(description = "总分页页码数", example = "9")
     private Long totalPages;
 
     /**
      * 分页数据列表
      */
+    @Schema(description = "当前分页数据列表项")
     private List<T> list;
 
     /**

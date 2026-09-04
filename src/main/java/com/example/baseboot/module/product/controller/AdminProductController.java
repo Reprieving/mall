@@ -21,6 +21,8 @@ import com.example.baseboot.module.product.spu.service.SpuService;
 import com.example.baseboot.module.product.spu.vo.SpuVO;
 import com.example.baseboot.module.shop.entity.Shop;
 import com.example.baseboot.module.shop.mapper.ShopMapper;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.util.CollectionUtils;
@@ -34,6 +36,7 @@ import java.util.stream.Collectors;
 /**
  * 运营端商品跨店铺多维检索与库存预警控制器
  */
+@Tag(name = "12. 运营端商品统筹 (AdminProductController)", description = "全平台商品多维检索、违规商品批量下架、批量改类目与库存预警大盘")
 @RestController
 @RequestMapping("/api/admin/spu")
 @RequiredArgsConstructor
@@ -48,6 +51,7 @@ public class AdminProductController {
     /**
      * 全平台商品跨店铺多条件高级检索
      */
+    @Operation(summary = "全平台跨店铺商品高级检索", description = "综合关键字、SPU 编码、所属店铺、类目、品牌、状态与库存阈值等多维组合检索")
     @GetMapping("/page")
     @RequirePermission("spu:view")
     public CommonResult<CommonPage<SpuVO>> pageSpu(SpuAdminQueryDTO queryDTO) {
@@ -138,6 +142,7 @@ public class AdminProductController {
     /**
      * 批量下架 / 删除违规商品
      */
+    @Operation(summary = "批量删除违规商品", description = "平台运营一键批量删除或强制清理违规违法商品")
     @DeleteMapping("/batch")
     @RequirePermission("spu:delete")
     public CommonResult<Integer> batchDeleteSpu(@Valid @RequestBody SpuBatchDeleteDTO batchDTO) {
@@ -157,6 +162,7 @@ public class AdminProductController {
     /**
      * 批量转移商品分类
      */
+    @Operation(summary = "批量变更商品类目", description = "在后台调整类目结构时，将勾选的多个商品快速迁移至指定新类目")
     @PutMapping("/batch/category")
     @RequirePermission("spu:edit")
     public CommonResult<Integer> batchUpdateCategory(@Valid @RequestBody SpuBatchCategoryDTO batchDTO) {
@@ -181,6 +187,7 @@ public class AdminProductController {
     /**
      * 查询库存告急预警列表 (按库存升序)
      */
+    @Operation(summary = "库存告急预警大盘", description = "筛选总库存低于告急警戒阈值（默认 10 件）的在售商品，按库存升序排查")
     @GetMapping("/stock-warning")
     @RequirePermission("spu:view")
     public CommonResult<List<StockWarningVO>> getStockWarningList(@RequestParam(value = "threshold", defaultValue = "10") Integer threshold,

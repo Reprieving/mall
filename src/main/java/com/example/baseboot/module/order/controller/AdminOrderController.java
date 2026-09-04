@@ -25,6 +25,8 @@ import com.example.baseboot.module.shop.vo.ShopVO;
 import com.example.baseboot.module.user.profile.dto.UserVO;
 import com.example.baseboot.module.user.profile.entity.SysUser;
 import com.example.baseboot.module.user.profile.mapper.SysUserMapper;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.util.CollectionUtils;
@@ -38,6 +40,7 @@ import java.util.stream.Collectors;
 /**
  * 运营端全平台跨店铺订单调度与流转跟踪控制器
  */
+@Tag(name = "06. 运营端订单调度 (AdminOrderController)", description = "全平台跨店铺订单高级检索、全景流转画像、插旗标色与时间轴追踪")
 @RestController
 @RequestMapping("/api/admin/order")
 @RequiredArgsConstructor
@@ -52,9 +55,10 @@ public class AdminOrderController {
     /**
      * 全平台跨店铺订单多维组合高级检索
      */
+    @Operation(summary = "全平台跨店铺订单高级检索", description = "支持按订单号、收件人、手机号、运单号、支付方式、插旗颜色等多维组合检索")
     @GetMapping("/page")
     @RequirePermission("order:view")
-    public CommonPage<OrderVO> pageOrders(OrderAdminQueryDTO queryDTO) {
+    public CommonResult<CommonPage<OrderVO>> pageOrders(OrderAdminQueryDTO queryDTO) {
         if (queryDTO == null) {
             queryDTO = new OrderAdminQueryDTO();
         }
@@ -97,7 +101,7 @@ public class AdminOrderController {
         Page<Order> orderPage = orderMapper.selectPage(page, wrapper);
 
         if (CollectionUtils.isEmpty(orderPage.getRecords())) {
-            return CommonPage.restPage(orderPage, Collections.emptyList());
+            return CommonResult.success(CommonPage.restPage(orderPage, Collections.emptyList()));
         }
 
         List<Long> orderIds = orderPage.getRecords().stream().map(Order::getId).collect(Collectors.toList());
@@ -117,12 +121,13 @@ public class AdminOrderController {
             return vo;
         }).collect(Collectors.toList());
 
-        return CommonPage.restPage(orderPage, voList);
+        return CommonResult.success(CommonPage.restPage(orderPage, voList));
     }
 
     /**
      * 获取全量订单详情 (含买家、店铺、商品快照明细与流转时间轴)
      */
+    @Operation(summary = "查询全量订单详情", description = "包含订单基本信息、收货人、买家画像、所属店铺、商品条目快照与流转时间线")
     @GetMapping("/{id}/detail")
     @RequirePermission("order:view")
     public CommonResult<OrderAdminDetailVO> getOrderDetail(@PathVariable("id") Long id) {
@@ -169,6 +174,7 @@ public class AdminOrderController {
     /**
      * 运营订单插旗标色与添加内部备注
      */
+    @Operation(summary = "运营订单插旗与添加备注", description = "设置订单插旗颜色（1-红, 2-黄, 3-绿, 4-蓝, 5-紫）与运营人员内部备注信息")
     @PutMapping("/{id}/remark")
     @RequirePermission("order:remark")
     public CommonResult<Void> updateOrderRemark(@PathVariable("id") Long id,
@@ -197,6 +203,7 @@ public class AdminOrderController {
     /**
      * 查询订单流转时间轴日志
      */
+    @Operation(summary = "查询订单流转时间轴日志", description = "获取指定订单各关键流转节点的操作时间、动作、经手人与明细")
     @GetMapping("/{id}/logs")
     @RequirePermission("order:view")
     public CommonResult<List<OrderLogVO>> getOrderLogs(@PathVariable("id") Long id) {

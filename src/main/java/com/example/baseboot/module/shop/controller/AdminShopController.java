@@ -18,6 +18,8 @@ import com.example.baseboot.module.user.cert.vo.UserCertVO;
 import com.example.baseboot.module.user.profile.dto.UserVO;
 import com.example.baseboot.module.user.profile.entity.SysUser;
 import com.example.baseboot.module.user.profile.mapper.SysUserMapper;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
@@ -28,6 +30,7 @@ import java.time.LocalDateTime;
 /**
  * 运营端店铺批量管控与综合详情控制器
  */
+@Tag(name = "15. 运营端店铺监管 (AdminShopController)", description = "全平台跨店铺批量状态封禁/恢复、店铺评分人工核准与全景透视详情")
 @RestController
 @RequestMapping("/api/admin/shop")
 @RequiredArgsConstructor
@@ -41,6 +44,7 @@ public class AdminShopController {
     /**
      * 批量管控店铺营业/封禁状态
      */
+    @Operation(summary = "批量管控店铺状态", description = "支持勾选多个店铺批量执行营业 (1) 或封禁关店 (3)")
     @PutMapping("/batch-status")
     @RequirePermission("shop:status")
     public CommonResult<Integer> batchUpdateShopStatus(@Valid @RequestBody ShopBatchStatusDTO batchDTO) {
@@ -60,6 +64,7 @@ public class AdminShopController {
     /**
      * 人工修正店铺综合评分
      */
+    @Operation(summary = "人工修正店铺评分", description = "平台运营对特定商户的服务分或综合评分（1.00 ~ 5.00）进行人工调整纠偏")
     @PutMapping("/{id}/score")
     @RequirePermission("shop:score")
     public CommonResult<Void> updateShopScore(@PathVariable("id") Long id,
@@ -82,6 +87,7 @@ public class AdminShopController {
     /**
      * 查看店铺全量全景详情 (包含店铺资料、认证资质、店主信息与商品数)
      */
+    @Operation(summary = "查询店铺全景详情画像", description = "聚合店铺基础信息、实名认证主体资料、店主买家账号以及旗下商品总数")
     @GetMapping("/{id}/full-detail")
     @RequirePermission("shop:view")
     public CommonResult<ShopAdminFullDetailVO> getShopFullDetail(@PathVariable("id") Long id) {

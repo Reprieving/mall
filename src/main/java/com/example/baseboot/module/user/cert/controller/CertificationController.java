@@ -7,6 +7,8 @@ import com.example.baseboot.common.context.UserContext;
 import com.example.baseboot.module.user.cert.dto.*;
 import com.example.baseboot.module.user.cert.service.CertificationService;
 import com.example.baseboot.module.user.cert.vo.UserCertVO;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
@@ -14,6 +16,7 @@ import org.springframework.web.bind.annotation.*;
 /**
  * 用户主体实名认证控制器 (支持个人、个体户、企业)
  */
+@Tag(name = "20. 主体实名认证 (CertificationController)", description = "用户个人、个体工商户、企业主体三类实名认证资料提交、审核与进度查询")
 @RestController
 @RequestMapping("/api/user/cert")
 @RequiredArgsConstructor
@@ -25,6 +28,7 @@ public class CertificationController {
     /**
      * 提交个人实名认证
      */
+    @Operation(summary = "提交个人实名认证", description = "上传本人真实姓名、身份证号码及身份证正反面影印件")
     @PostMapping("/personal")
     public CommonResult<UserCertVO> submitPersonalCert(@Valid @RequestBody PersonalCertDTO certDTO) {
         Long userId = UserContext.getUserId();
@@ -35,6 +39,7 @@ public class CertificationController {
     /**
      * 提交个体工商户认证
      */
+    @Operation(summary = "提交个体工商户认证", description = "上传个体字号、统一社会信用代码、营业执照照片及经营者身份证件")
     @PostMapping("/individual")
     public CommonResult<UserCertVO> submitIndividualCert(@Valid @RequestBody IndividualCertDTO certDTO) {
         Long userId = UserContext.getUserId();
@@ -45,6 +50,7 @@ public class CertificationController {
     /**
      * 提交企业实名认证
      */
+    @Operation(summary = "提交企业实名认证", description = "上传企业完整名称、统一社会信用代码、营业执照、法定代表人姓名与法人身份证照片")
     @PostMapping("/enterprise")
     public CommonResult<UserCertVO> submitEnterpriseCert(@Valid @RequestBody EnterpriseCertDTO certDTO) {
         Long userId = UserContext.getUserId();
@@ -55,6 +61,7 @@ public class CertificationController {
     /**
      * 查询当前用户的实名认证状态与详情
      */
+    @Operation(summary = "查询我的实名认证", description = "查看当前登录账号的主体认证类型、提交资料与当前审核流转状态")
     @GetMapping("/my")
     public CommonResult<UserCertVO> getMyCertification() {
         Long userId = UserContext.getUserId();
@@ -65,6 +72,7 @@ public class CertificationController {
     /**
      * 审核实名认证申请 (通过 / 驳回)
      */
+    @Operation(summary = "审批实名认证申请", description = "运营管理员审核资质真实性，执行审核通过 (1) 或驳回 (2) 并记录审核原因")
     @PostMapping("/audit")
     public CommonResult<UserCertVO> auditCertification(@Valid @RequestBody CertAuditDTO auditDTO) {
         UserCertVO certVO = certificationService.auditCertification(auditDTO);
@@ -74,6 +82,7 @@ public class CertificationController {
     /**
      * 根据用户 ID 查询实名认证信息 (管理端)
      */
+    @Operation(summary = "按用户ID查询认证信息", description = "管理端通过买家用户 ID 直接调取其名下绑定的主体认证档案")
     @GetMapping("/{userId}")
     public CommonResult<UserCertVO> getCertByUserId(@PathVariable("userId") Long userId) {
         UserCertVO certVO = certificationService.getCertificationByUserId(userId);
@@ -83,6 +92,7 @@ public class CertificationController {
     /**
      * 分页多条件查询认证审核列表 (管理端)
      */
+    @Operation(summary = "多条件分页查询认证审核列表", description = "按认证类型（个人/个体/企业）、审核状态及申请人关键字多条件检索待审或历史记录")
     @GetMapping("/page")
     public CommonResult<CommonPage<UserCertVO>> pageCertifications(CertQueryDTO queryDTO) {
         CommonPage<UserCertVO> page = certificationService.pageCertifications(queryDTO);
