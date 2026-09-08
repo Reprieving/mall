@@ -203,4 +203,25 @@ class ProductModuleTests {
         Assertions.assertEquals(3L, commonPage.getTotalPages());
         Assertions.assertEquals(3, commonPage.getList().size());
     }
+
+    @Test
+    void testMapBySkuIdsNoDuplication() {
+        List<SkuSpecValue> records = Arrays.asList(
+                SkuSpecValue.builder().id(1L).skuId(11L).spuId(3L).specKeyId(1L).specKeyName("颜色").specValueId(1L).specValue("经典黑").build(),
+                SkuSpecValue.builder().id(2L).skuId(11L).spuId(3L).specKeyId(2L).specKeyName("尺码").specValueId(101L).specValue("M").build(),
+                SkuSpecValue.builder().id(3L).skuId(12L).spuId(3L).specKeyId(1L).specKeyName("颜色").specValueId(1L).specValue("经典黑").build(),
+                SkuSpecValue.builder().id(4L).skuId(12L).spuId(3L).specKeyId(2L).specKeyName("尺码").specValueId(102L).specValue("L").build()
+        );
+
+        Map<Long, List<SkuSpecValueVO>> skuSpecMap = records.stream().collect(java.util.stream.Collectors.groupingBy(
+                SkuSpecValue::getSkuId,
+                java.util.stream.Collectors.mapping(SkuSpecValueVO::fromEntity, java.util.stream.Collectors.toList())
+        ));
+
+        Assertions.assertEquals(2, skuSpecMap.size());
+        List<SkuSpecValueVO> sku11Specs = skuSpecMap.get(11L);
+        Assertions.assertEquals(2, sku11Specs.size());
+        Assertions.assertEquals("颜色", sku11Specs.get(0).getSpecKeyName());
+        Assertions.assertEquals("尺码", sku11Specs.get(1).getSpecKeyName());
+    }
 }

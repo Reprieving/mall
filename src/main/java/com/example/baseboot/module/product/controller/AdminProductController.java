@@ -34,9 +34,9 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 /**
- * 运营端商品跨店铺多维检索与库存预警控制器
+ * 运营端商品检索与预警控制器
  */
-@Tag(name = "12. 运营端商品统筹 (AdminProductController)", description = "全平台商品多维检索、违规商品批量下架、批量改类目与库存预警大盘")
+@Tag(name = "商品运营管理 (AdminProductController)", description = "商品检索、批量下架、类目转移与库存预警")
 @RestController
 @RequestMapping("/api/admin/spu")
 @RequiredArgsConstructor

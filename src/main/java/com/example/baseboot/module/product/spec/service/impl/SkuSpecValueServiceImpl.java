@@ -47,34 +47,92 @@ public class SkuSpecValueServiceImpl extends ServiceImpl<SkuSpecValueMapper, Sku
             return;
         }
 
+        Set<Long> processedKeyIds = new HashSet<>();
+        List<SkuSpecValue> toInsert = new ArrayList<>();
+
         for (SkuSpecValueItemDTO item : specValueItems) {
-            if (item.getSpecKeyId() == null || item.getSpecValueId() == null) {
+            if (item == null) {
                 continue;
             }
 
+            Long keyId = item.getSpecKeyId();
             String keyName = item.getSpecKeyName();
-            if (!StringUtils.hasText(keyName)) {
-                SpecKey key = specKeyMapper.selectById(item.getSpecKeyId());
+            Long valueId = item.getSpecValueId();
+            String val = item.getSpecValue();
+
+            // 1. 若未传 specKeyId 但传了名称，自动按名称检索或新建 SpecKey
+            if (keyId == null && StringUtils.hasText(keyName)) {
+                SpecKey existKey = specKeyMapper.selectOne(new LambdaQueryWrapper<SpecKey>()
+                        .eq(SpecKey::getName, keyName.trim())
+                        .last("LIMIT 1"));
+                if (existKey == null) {
+                    existKey = SpecKey.builder()
+                            .categoryId(0L)
+                            .name(keyName.trim())
+                            .sort(0)
+                            .status(1)
+                            .createTime(LocalDateTime.now())
+                            .updateTime(LocalDateTime.now())
+                            .build();
+                    specKeyMapper.insert(existKey);
+                }
+                keyId = existKey.getId();
+                keyName = existKey.getName();
+            } else if (keyId != null && !StringUtils.hasText(keyName)) {
+                SpecKey key = specKeyMapper.selectById(keyId);
                 keyName = key != null ? key.getName() : "";
             }
 
-            String val = item.getSpecValue();
-            if (!StringUtils.hasText(val)) {
-                SpecValue valueEntity = specValueMapper.selectById(item.getSpecValueId());
+            if (keyId == null) {
+                continue;
+            }
+
+            // 2. 若未传 specValueId 但传了文本，自动按值检索或新建 SpecValue
+            if (valueId == null && StringUtils.hasText(val)) {
+                SpecValue existVal = specValueMapper.selectOne(new LambdaQueryWrapper<SpecValue>()
+                        .eq(SpecValue::getSpecKeyId, keyId)
+                        .eq(SpecValue::getValue, val.trim())
+                        .last("LIMIT 1"));
+                if (existVal == null) {
+                    existVal = SpecValue.builder()
+                            .specKeyId(keyId)
+                            .value(val.trim())
+                            .sort(0)
+                            .status(1)
+                            .createTime(LocalDateTime.now())
+                            .updateTime(LocalDateTime.now())
+                            .build();
+                    specValueMapper.insert(existVal);
+                }
+                valueId = existVal.getId();
+                val = existVal.getValue();
+            } else if (valueId != null && !StringUtils.hasText(val)) {
+                SpecValue valueEntity = specValueMapper.selectById(valueId);
                 val = valueEntity != null ? valueEntity.getValue() : "";
             }
 
-            SkuSpecValue record = SkuSpecValue.builder()
+            if (valueId == null) {
+                continue;
+            }
+
+            // 防止同一个 SKU 针对同一规格维度重复绑定
+            if (!processedKeyIds.add(keyId)) {
+                continue;
+            }
+
+            toInsert.add(SkuSpecValue.builder()
                     .skuId(skuId)
                     .spuId(spuId)
-                    .specKeyId(item.getSpecKeyId())
+                    .specKeyId(keyId)
                     .specKeyName(keyName)
-                    .specValueId(item.getSpecValueId())
+                    .specValueId(valueId)
                     .specValue(val)
                     .createTime(LocalDateTime.now())
-                    .build();
+                    .build());
+        }
 
-            this.save(record);
+        if (!toInsert.isEmpty()) {
+            this.saveBatch(toInsert);
         }
     }
 
@@ -86,6 +144,10 @@ public class SkuSpecValueServiceImpl extends ServiceImpl<SkuSpecValueMapper, Sku
         List<SkuSpecValue> list = this.list(new LambdaQueryWrapper<SkuSpecValue>()
                 .eq(SkuSpecValue::getSkuId, skuId)
                 .orderByAsc(SkuSpecValue::getId));
+
+        if (CollectionUtils.isEmpty(list)) {
+            return Collections.emptyList();
+        }
 
         return list.stream().map(SkuSpecValueVO::fromEntity).collect(Collectors.toList());
     }
@@ -99,14 +161,14 @@ public class SkuSpecValueServiceImpl extends ServiceImpl<SkuSpecValueMapper, Sku
                 .in(SkuSpecValue::getSkuId, skuIds)
                 .orderByAsc(SkuSpecValue::getId));
 
-        return list.stream()
-                .map(SkuSpecValueVO::fromEntity)
-                .collect(Collectors.groupingBy(SkuSpecValueVO::getSpecKeyId,
-                        Collectors.mapping(v -> v, Collectors.toList())))
-                .entrySet().stream()
-                .flatMap(e -> list.stream())
-                .collect(Collectors.groupingBy(SkuSpecValue::getSkuId,
-                        Collectors.mapping(SkuSpecValueVO::fromEntity, Collectors.toList())));
+        if (CollectionUtils.isEmpty(list)) {
+            return Collections.emptyMap();
+        }
+
+        return list.stream().collect(Collectors.groupingBy(
+                SkuSpecValue::getSkuId,
+                Collectors.mapping(SkuSpecValueVO::fromEntity, Collectors.toList())
+        ));
     }
 
     @Override

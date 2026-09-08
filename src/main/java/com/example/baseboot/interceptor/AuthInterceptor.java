@@ -127,7 +127,7 @@ public class AuthInterceptor implements HandlerInterceptor {
             return true;
         }
 
-        // 2. 普通买家/商家端接口拦截
+        // 2. 普通买家/商家端或通用业务接口拦截 (@LoginRequired / /api/user/**)
         boolean loginRequired = method.isAnnotationPresent(LoginRequired.class) 
                 || clazz.isAnnotationPresent(LoginRequired.class)
                 || uri.startsWith("/api/user");
@@ -141,27 +141,67 @@ public class AuthInterceptor implements HandlerInterceptor {
                 throw new BusinessException(ResultCode.UNAUTHORIZED, "Token 无效或已过期");
             }
 
-            Long userId = jwtUtils.getUserIdFromToken(authHeader);
-            String email = jwtUtils.getEmailFromToken(authHeader);
+            String userType = jwtUtils.getUserTypeFromToken(authHeader);
 
-            if (userId == null) {
-                throw new BusinessException(ResultCode.UNAUTHORIZED, "无效的用户身份凭证");
+            if ("ADMIN".equalsIgnoreCase(userType)) {
+                // 如果携带的是有效的管理员 Token，放行并注入管理员上下文
+                Long adminId = jwtUtils.getAdminIdFromToken(authHeader);
+                String username = jwtUtils.getUsernameFromToken(authHeader);
+                String roleCode = jwtUtils.getRoleCodeFromToken(authHeader);
+
+                if (adminId == null) {
+                    throw new BusinessException(ResultCode.UNAUTHORIZED, "无效的管理员身份凭证");
+                }
+
+                RBucket<String> sessionBucket = redissonClient.getBucket(ADMIN_TOKEN_KEY_PREFIX + adminId);
+                String cachedToken = sessionBucket.get();
+                if (cachedToken == null) {
+                    log.warn("管理员 [{}] 在 Redisson 中的会话已失效或已退出", adminId);
+                    throw new BusinessException(ResultCode.UNAUTHORIZED, "管理员登录已失效，请重新登录");
+                }
+
+                AdminContext.set(AdminContext.AdminUserContextInfo.builder()
+                        .adminId(adminId)
+                        .username(username)
+                        .roleCode(roleCode)
+                        .build());
+                // 同步设置 UserContext 供通用方法读取
+                UserContext.setUserId(adminId);
+                UserContext.setUserEmail(username);
+            } else {
+                // 普通用户 Token 处理
+                Long userId = jwtUtils.getUserIdFromToken(authHeader);
+                String email = jwtUtils.getEmailFromToken(authHeader);
+
+                if (userId == null) {
+                    throw new BusinessException(ResultCode.UNAUTHORIZED, "无效的用户身份凭证");
+                }
+
+                RBucket<String> sessionBucket = redissonClient.getBucket(USER_TOKEN_KEY_PREFIX + userId);
+                String cachedToken = sessionBucket.get();
+                if (cachedToken == null) {
+                    log.warn("用户 [{}] 在 Redisson 中的会话已失效或已退出", userId);
+                    throw new BusinessException(ResultCode.UNAUTHORIZED, "登录已失效，请重新登录");
+                }
+
+                UserContext.setUserId(userId);
+                UserContext.setUserEmail(email);
             }
-
-            RBucket<String> sessionBucket = redissonClient.getBucket(USER_TOKEN_KEY_PREFIX + userId);
-            String cachedToken = sessionBucket.get();
-            if (cachedToken == null) {
-                log.warn("用户 [{}] 在 Redisson 中的会话已失效或已退出", userId);
-                throw new BusinessException(ResultCode.UNAUTHORIZED, "登录已失效，请重新登录");
-            }
-
-            UserContext.setUserId(userId);
-            UserContext.setUserEmail(email);
         } else if (StringUtils.hasText(authHeader) && jwtUtils.validateToken(authHeader)) {
-            Long userId = jwtUtils.getUserIdFromToken(authHeader);
-            String email = jwtUtils.getEmailFromToken(authHeader);
-            UserContext.setUserId(userId);
-            UserContext.setUserEmail(email);
+            String userType = jwtUtils.getUserTypeFromToken(authHeader);
+            if ("ADMIN".equalsIgnoreCase(userType)) {
+                Long adminId = jwtUtils.getAdminIdFromToken(authHeader);
+                String username = jwtUtils.getUsernameFromToken(authHeader);
+                AdminContext.set(AdminContext.AdminUserContextInfo.builder()
+                        .adminId(adminId)
+                        .username(username)
+                        .build());
+            } else {
+                Long userId = jwtUtils.getUserIdFromToken(authHeader);
+                String email = jwtUtils.getEmailFromToken(authHeader);
+                UserContext.setUserId(userId);
+                UserContext.setUserEmail(email);
+            }
         }
 
         return true;
