@@ -42,7 +42,7 @@ import java.util.stream.Collectors;
  */
 @Tag(name = "06. 运营端订单调度 (AdminOrderController)", description = "全平台跨店铺订单高级检索、全景流转画像、插旗标色与时间轴追踪")
 @RestController
-@RequestMapping("/api/admin/order")
+@RequestMapping("/admin/order")
 @RequiredArgsConstructor
 public class AdminOrderController {
 

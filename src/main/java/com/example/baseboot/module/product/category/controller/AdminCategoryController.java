@@ -21,9 +21,9 @@ import java.util.List;
  */
 @Tag(name = "08. 商品类目管理 (CategoryController)", description = "商品多级类目创建、修改、删除、分类树查询与状态启停")
 @RestController
-@RequestMapping("/api/category")
+@RequestMapping("/admin/category")
 @RequiredArgsConstructor
-public class CategoryController {
+public class AdminCategoryController {
 
     private final CategoryService categoryService;
 

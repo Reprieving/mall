@@ -1,4 +1,4 @@
-package com.example.baseboot.module.product.vo;
+package com.example.baseboot.module.product.spu.vo;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;

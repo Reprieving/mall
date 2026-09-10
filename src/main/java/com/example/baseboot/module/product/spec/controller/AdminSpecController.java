@@ -22,9 +22,9 @@ import java.util.List;
  */
 @Tag(name = "10. 商品规格属性管理 (SpecController)", description = "规格项定义、分类绑定模板、规格值维护与批量录入")
 @RestController
-@RequestMapping("/api/spec")
+@RequestMapping("/admin/spec")
 @RequiredArgsConstructor
-public class SpecController {
+public class AdminSpecController {
 
     private final SpecKeyService specKeyService;
     private final SpecValueService specValueService;

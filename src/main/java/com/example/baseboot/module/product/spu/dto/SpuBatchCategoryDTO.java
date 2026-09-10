@@ -1,4 +1,4 @@
-package com.example.baseboot.module.product.dto;
+package com.example.baseboot.module.product.spu.dto;
 
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;

@@ -2,10 +2,7 @@ package com.example.baseboot;
 
 import com.example.baseboot.module.dashboard.vo.DashboardOverviewVO;
 import com.example.baseboot.module.dashboard.vo.DashboardTodosVO;
-import com.example.baseboot.module.dashboard.vo.TopProductVO;
-import com.example.baseboot.module.order.vo.OrderAdminDetailVO;
-import com.example.baseboot.module.order.vo.OrderLogVO;
-import com.example.baseboot.module.product.vo.StockWarningVO;
+import com.example.baseboot.module.product.spu.vo.StockWarningVO;
 import com.example.baseboot.module.system.entity.SysAdminUser;
 import com.example.baseboot.module.system.entity.SysRole;
 import com.example.baseboot.module.system.vo.AdminUserVO;
@@ -17,8 +14,6 @@ import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
-import java.util.Arrays;
-import java.util.List;
 
 class AdminModuleTests {
 

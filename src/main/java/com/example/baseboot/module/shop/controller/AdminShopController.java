@@ -32,7 +32,7 @@ import java.time.LocalDateTime;
  */
 @Tag(name = "15. 运营端店铺监管 (AdminShopController)", description = "全平台跨店铺批量状态封禁/恢复、店铺评分人工核准与全景透视详情")
 @RestController
-@RequestMapping("/api/admin/shop")
+@RequestMapping("/admin/shop")
 @RequiredArgsConstructor
 public class AdminShopController {
 

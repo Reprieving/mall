@@ -22,9 +22,9 @@ import java.util.List;
  */
 @Tag(name = "09. 商品规格库存SKU (SkuController)", description = "商品 SKU 矩阵录入、更新、独立调价、库存调整与上下架")
 @RestController
-@RequestMapping("/api/sku")
+@RequestMapping("/admin/sku")
 @RequiredArgsConstructor
-public class SkuController {
+public class AdminSkuController {
 
     private final SkuService skuService;
 

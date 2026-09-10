@@ -1,4 +1,4 @@
-package com.example.baseboot.module.product.dto;
+package com.example.baseboot.module.product.spu.dto;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;

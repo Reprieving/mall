@@ -20,10 +20,10 @@ import java.util.List;
  */
 @Tag(name = "19. 买家收货地址 (UserAddressController)", description = "买家收货地址添加、修改、删除、详情、多地址列表与设为默认地址")
 @RestController
-@RequestMapping("/api/user/address")
+@RequestMapping("/admin/user/address")
 @RequiredArgsConstructor
 @LoginRequired
-public class UserAddressController {
+public class AdminUserAddressController {
 
     private final UserAddressService userAddressService;
 

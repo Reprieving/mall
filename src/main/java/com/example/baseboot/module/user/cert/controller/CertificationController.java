@@ -69,33 +69,7 @@ public class CertificationController {
         return CommonResult.success(certVO);
     }
 
-    /**
-     * 审核实名认证申请 (通过 / 驳回)
-     */
-    @Operation(summary = "审批实名认证申请", description = "运营管理员审核资质真实性，执行审核通过 (1) 或驳回 (2) 并记录审核原因")
-    @PostMapping("/audit")
-    public CommonResult<UserCertVO> auditCertification(@Valid @RequestBody CertAuditDTO auditDTO) {
-        UserCertVO certVO = certificationService.auditCertification(auditDTO);
-        return CommonResult.success(certVO, "实名认证审核操作完成");
-    }
 
-    /**
-     * 根据用户 ID 查询实名认证信息 (管理端)
-     */
-    @Operation(summary = "按用户ID查询认证信息", description = "管理端通过买家用户 ID 直接调取其名下绑定的主体认证档案")
-    @GetMapping("/{userId}")
-    public CommonResult<UserCertVO> getCertByUserId(@PathVariable("userId") Long userId) {
-        UserCertVO certVO = certificationService.getCertificationByUserId(userId);
-        return CommonResult.success(certVO);
-    }
 
-    /**
-     * 分页多条件查询认证审核列表 (管理端)
-     */
-    @Operation(summary = "多条件分页查询认证审核列表", description = "按认证类型（个人/个体/企业）、审核状态及申请人关键字多条件检索待审或历史记录")
-    @GetMapping("/page")
-    public CommonResult<CommonPage<UserCertVO>> pageCertifications(CertQueryDTO queryDTO) {
-        CommonPage<UserCertVO> page = certificationService.pageCertifications(queryDTO);
-        return CommonResult.success(page);
-    }
+
 }

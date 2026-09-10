@@ -22,7 +22,7 @@ import java.util.List;
  */
 @Tag(name = "16. 运营系统管理与RBAC (AdminSysController)", description = "运营后台管理员账号增删改查、状态启停、重置密码及 RBAC 角色权限配置")
 @RestController
-@RequestMapping("/api/admin/sys")
+@RequestMapping("/admin/sys")
 @RequiredArgsConstructor
 public class AdminSysController {
 

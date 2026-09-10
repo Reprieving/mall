@@ -20,7 +20,7 @@ import java.util.List;
  */
 @Tag(name = "18. 买家用户管控 (AdminUserController)", description = "运营后台买家用户多维检索、用户全景档案、账号封禁解封与密码重置")
 @RestController
-@RequestMapping("/api/admin/user")
+@RequestMapping("/admin/user")
 @RequiredArgsConstructor
 public class AdminUserController {
 

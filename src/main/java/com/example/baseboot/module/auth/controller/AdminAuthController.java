@@ -18,7 +18,7 @@ import org.springframework.web.bind.annotation.*;
  */
 @Tag(name = "02. 运营管理员认证 (AdminAuthController)", description = "平台运营管理员登录、信息与权限清单获取、退出登录")
 @RestController
-@RequestMapping("/api/admin/auth")
+@RequestMapping("/admin/auth")
 @RequiredArgsConstructor
 public class AdminAuthController {
 

@@ -16,7 +16,7 @@ import java.util.List;
  */
 @Tag(name = "03. 运营数据大盘 (AdminDashboardController)", description = "全平台跨店铺运营大盘、今日 GMV/客单价、待办事项红点、销售趋势与热销排行榜")
 @RestController
-@RequestMapping("/api/admin/dashboard")
+@RequestMapping("/admin/dashboard")
 @RequiredArgsConstructor
 public class AdminDashboardController {
 
