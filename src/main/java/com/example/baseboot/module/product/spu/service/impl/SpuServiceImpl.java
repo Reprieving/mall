@@ -25,6 +25,7 @@ import com.example.baseboot.module.product.spec.mapper.SpecKeyMapper;
 import com.example.baseboot.module.product.spec.mapper.SpecValueMapper;
 import com.example.baseboot.module.product.spec.mapper.SpuSpecRelationMapper;
 import com.example.baseboot.module.product.spec.service.SkuSpecValueService;
+import com.example.baseboot.module.product.spec.util.SkuSpecUtils;
 import com.example.baseboot.module.product.spec.vo.SkuSpecValueVO;
 import com.example.baseboot.module.product.spec.vo.SpecValueVO;
 import com.example.baseboot.module.product.spu.dto.SpuCreateDTO;
@@ -134,6 +135,9 @@ public class SpuServiceImpl extends ServiceImpl<SpuMapper, Spu> implements SpuSe
                 throw new BusinessException(ResultCode.VALIDATE_FAILED, "SKU编码不能为空");
             }
         }
+
+        // 校验 SKU 列表内部规格组合唯一性
+        validateSkuSpecifications(null, skuDTOList);
 
         // 5. 计算最低售价、最高售价、总库存
         BigDecimal minPrice = skuDTOList.stream()
@@ -283,17 +287,19 @@ public class SpuServiceImpl extends ServiceImpl<SpuMapper, Spu> implements SpuSe
             }
         }
 
-        // 3. 重建 SPU 规格选用关联 (pms_spu_spec_relation)
-        spuSpecRelationMapper.delete(new LambdaQueryWrapper<SpuSpecRelation>().eq(SpuSpecRelation::getSpuId, id));
-        int specType = updateDTO.getSpecType() != null ? updateDTO.getSpecType() : spu.getSpecType();
-        List<SpuSpecVO> spuSpecVOList = saveSpuSpecRelations(id, updateDTO.getCategoryId(), specType, updateDTO.getSpecList(), updateDTO.getSkuList());
-
-        // 4. 维护 SKU 列表 (更新已有、新增、清理移除的 SKU 与 pms_sku_spec_value)
+        // 3. 校验 SKU 列表不能为空且规格组合不重复
         List<SkuItemDTO> incomingSkuList = updateDTO.getSkuList();
         if (CollectionUtils.isEmpty(incomingSkuList)) {
             throw new BusinessException(ResultCode.VALIDATE_FAILED, "SKU列表不能为空");
         }
+        validateSkuSpecifications(id, incomingSkuList);
 
+        // 4. 重建 SPU 规格选用关联 (pms_spu_spec_relation)
+        spuSpecRelationMapper.delete(new LambdaQueryWrapper<SpuSpecRelation>().eq(SpuSpecRelation::getSpuId, id));
+        int specType = updateDTO.getSpecType() != null ? updateDTO.getSpecType() : spu.getSpecType();
+        List<SpuSpecVO> spuSpecVOList = saveSpuSpecRelations(id, updateDTO.getCategoryId(), specType, updateDTO.getSpecList(), incomingSkuList);
+
+        // 5. 维护 SKU 列表 (更新已有、新增、清理移除的 SKU 与 pms_sku_spec_value)
         List<Sku> existingSkus = skuMapper.selectList(new LambdaQueryWrapper<Sku>().eq(Sku::getSpuId, id));
         Map<Long, Sku> existingSkuMap = existingSkus.stream().collect(Collectors.toMap(Sku::getId, s -> s));
 
@@ -673,7 +679,7 @@ public class SpuServiceImpl extends ServiceImpl<SpuMapper, Spu> implements SpuSe
     }
 
     /**
-     * 保存 SPU 选用的规格维度与规格值列表
+     * 保存 SPU 选用的规格维度与规格值列表 (融合 specList 与 skuList)
      */
     private List<SpuSpecVO> saveSpuSpecRelations(Long spuId, Long categoryId, int specType, List<SpuSpecItemDTO> specList, List<SkuItemDTO> skuList) {
         List<SpuSpecVO> resultList = new ArrayList<>();
@@ -681,186 +687,161 @@ public class SpuServiceImpl extends ServiceImpl<SpuMapper, Spu> implements SpuSe
             return resultList;
         }
 
-        // 如果未传入顶层 specList，但 SKU 列表中传入了具体 specValues，则自动从 SKU 列表中推断并聚合生成 specList
-        if (CollectionUtils.isEmpty(specList) && !CollectionUtils.isEmpty(skuList)) {
-            Map<String, Set<String>> keyToValuesMap = new LinkedHashMap<>();
-            Map<String, Long> keyNameToIdMap = new HashMap<>();
-            Map<String, Map<String, Long>> valNameToIdMap = new HashMap<>();
+        Map<Long, KeyHolder> keyHolderMap = new LinkedHashMap<>();
 
+        // 1. 采集顶层规格清单 specList
+        if (!CollectionUtils.isEmpty(specList)) {
+            for (SpuSpecItemDTO item : specList) {
+                if (item == null) continue;
+                Long keyId = resolveOrCreateSpecKey(item.getSpecKeyId(), item.getSpecName(), categoryId);
+                if (keyId == null) continue;
+
+                String keyName = item.getSpecName();
+                if (!StringUtils.hasText(keyName)) {
+                    SpecKey k = specKeyMapper.selectById(keyId);
+                    if (k != null) keyName = k.getName();
+                }
+
+                KeyHolder holder = keyHolderMap.computeIfAbsent(keyId, k -> new KeyHolder(k, ""));
+                if (StringUtils.hasText(keyName) && !StringUtils.hasText(holder.keyName)) {
+                    holder.keyName = keyName;
+                }
+
+                if (!CollectionUtils.isEmpty(item.getSpecValueIds())) {
+                    for (Long valId : item.getSpecValueIds()) {
+                        if (valId == null) continue;
+                        SpecValue valEntity = specValueMapper.selectById(valId);
+                        if (valEntity != null && StringUtils.hasText(valEntity.getValue())) {
+                            String vStr = valEntity.getValue().trim();
+                            holder.values.add(vStr);
+                            holder.valueToId.put(vStr, valEntity.getId());
+                        }
+                    }
+                }
+
+                if (!CollectionUtils.isEmpty(item.getSpecValues())) {
+                    for (String valStr : item.getSpecValues()) {
+                        if (StringUtils.hasText(valStr)) {
+                            holder.values.add(valStr.trim());
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. 补充采集 SKU 矩阵中的规格项 (保障 SKU 中出现的规格全部纳入 SPU 规格矩阵)
+        if (!CollectionUtils.isEmpty(skuList)) {
             for (SkuItemDTO sku : skuList) {
-                if (sku != null && !CollectionUtils.isEmpty(sku.getSpecValues())) {
-                    for (SkuSpecValueItemDTO sv : sku.getSpecValues()) {
+                if (sku == null) continue;
+                List<SkuSpecValueItemDTO> specValues = sku.getSpecValues();
+                if (CollectionUtils.isEmpty(specValues) && StringUtils.hasText(sku.getSpecData())) {
+                    try {
+                        specValues = OBJECT_MAPPER.readValue(
+                                sku.getSpecData(),
+                                OBJECT_MAPPER.getTypeFactory().constructCollectionType(List.class, SkuSpecValueItemDTO.class)
+                        );
+                    } catch (Exception ignored) {}
+                }
+                if (!CollectionUtils.isEmpty(specValues)) {
+                    for (SkuSpecValueItemDTO sv : specValues) {
                         if (sv == null) continue;
-                        String kName = sv.getSpecKeyName();
-                        String vName = sv.getSpecValue();
-                        Long kId = sv.getSpecKeyId();
-                        Long vId = sv.getSpecValueId();
+                        Long keyId = resolveOrCreateSpecKey(sv.getSpecKeyId(), sv.getSpecKeyName(), categoryId);
+                        if (keyId == null) continue;
 
-                        if (!StringUtils.hasText(kName) && kId != null) {
-                            SpecKey k = specKeyMapper.selectById(kId);
-                            if (k != null) kName = k.getName();
-                        }
-                        if (!StringUtils.hasText(vName) && vId != null) {
-                            SpecValue v = specValueMapper.selectById(vId);
-                            if (v != null) vName = v.getValue();
+                        String keyName = sv.getSpecKeyName();
+                        if (!StringUtils.hasText(keyName)) {
+                            SpecKey k = specKeyMapper.selectById(keyId);
+                            if (k != null) keyName = k.getName();
                         }
 
-                        if (StringUtils.hasText(kName) && StringUtils.hasText(vName)) {
-                            keyToValuesMap.computeIfAbsent(kName.trim(), k -> new LinkedHashSet<>()).add(vName.trim());
-                            if (kId != null) keyNameToIdMap.put(kName.trim(), kId);
-                            if (vId != null) {
-                                valNameToIdMap.computeIfAbsent(kName.trim(), k -> new HashMap<>()).put(vName.trim(), vId);
+                        KeyHolder holder = keyHolderMap.computeIfAbsent(keyId, k -> new KeyHolder(k, ""));
+                        if (StringUtils.hasText(keyName) && !StringUtils.hasText(holder.keyName)) {
+                            holder.keyName = keyName;
+                        }
+
+                        String valStr = sv.getSpecValue();
+                        Long valId = sv.getSpecValueId();
+                        if (StringUtils.hasText(valStr)) {
+                            String trimmed = valStr.trim();
+                            holder.values.add(trimmed);
+                            if (valId != null) {
+                                holder.valueToId.put(trimmed, valId);
+                            }
+                        } else if (valId != null) {
+                            SpecValue valEntity = specValueMapper.selectById(valId);
+                            if (valEntity != null && StringUtils.hasText(valEntity.getValue())) {
+                                String trimmed = valEntity.getValue().trim();
+                                holder.values.add(trimmed);
+                                holder.valueToId.put(trimmed, valEntity.getId());
                             }
                         }
                     }
                 }
             }
-
-            if (!keyToValuesMap.isEmpty()) {
-                specList = new ArrayList<>();
-                for (Map.Entry<String, Set<String>> entry : keyToValuesMap.entrySet()) {
-                    String kName = entry.getKey();
-                    Long kId = keyNameToIdMap.get(kName);
-                    List<String> valStrings = new ArrayList<>(entry.getValue());
-                    List<Long> valIds = new ArrayList<>();
-                    Map<String, Long> valIdMap = valNameToIdMap.get(kName);
-                    if (valIdMap != null) {
-                        for (String vStr : valStrings) {
-                            Long vId = valIdMap.get(vStr);
-                            if (vId != null) valIds.add(vId);
-                        }
-                    }
-
-                    specList.add(SpuSpecItemDTO.builder()
-                            .specKeyId(kId)
-                            .specName(kName)
-                            .specValues(valStrings)
-                            .specValueIds(valIds)
-                            .build());
-                }
-            }
         }
 
-        if (CollectionUtils.isEmpty(specList)) {
+        if (keyHolderMap.isEmpty()) {
             return resultList;
         }
 
-        for (SpuSpecItemDTO item : specList) {
-            if (item == null) {
-                continue;
+        // 3. 落库关联关系与构建结果
+        for (KeyHolder holder : keyHolderMap.values()) {
+            Long keyId = holder.keyId;
+            String keyName = holder.keyName;
+            if (!StringUtils.hasText(keyName)) {
+                SpecKey k = specKeyMapper.selectById(keyId);
+                keyName = k != null ? k.getName() : "";
             }
 
-            Long keyId = item.getSpecKeyId();
-            String keyName = item.getSpecName();
-
-            // 若未传 specKeyId，则根据名称与分类自动查找或创建 SpecKey
-            if (keyId == null && StringUtils.hasText(keyName)) {
-                SpecKey existKey = specKeyMapper.selectOne(new LambdaQueryWrapper<SpecKey>()
-                        .eq(categoryId != null && categoryId > 0, SpecKey::getCategoryId, categoryId)
-                        .eq(SpecKey::getName, keyName.trim())
-                        .last("LIMIT 1"));
-                if (existKey == null) {
-                    existKey = specKeyMapper.selectOne(new LambdaQueryWrapper<SpecKey>()
-                            .eq(SpecKey::getCategoryId, 0)
-                            .eq(SpecKey::getName, keyName.trim())
+            List<SpecValueVO> valueVOs = new ArrayList<>();
+            for (String valStr : holder.values) {
+                Long candidateId = holder.valueToId.get(valStr);
+                SpecValue valEntity = null;
+                if (candidateId != null) {
+                    SpecValue existing = specValueMapper.selectById(candidateId);
+                    if (existing != null && Objects.equals(existing.getSpecKeyId(), keyId)
+                            && valStr.equalsIgnoreCase(existing.getValue().trim())) {
+                        valEntity = existing;
+                    }
+                }
+                if (valEntity == null) {
+                    valEntity = specValueMapper.selectOne(new LambdaQueryWrapper<SpecValue>()
+                            .eq(SpecValue::getSpecKeyId, keyId)
+                            .eq(SpecValue::getValue, valStr)
                             .last("LIMIT 1"));
                 }
-                if (existKey == null) {
-                    existKey = SpecKey.builder()
-                            .categoryId(categoryId != null ? categoryId : 0L)
-                            .name(keyName.trim())
+                if (valEntity == null) {
+                    valEntity = SpecValue.builder()
+                            .specKeyId(keyId)
+                            .value(valStr)
                             .sort(0)
                             .status(1)
                             .createTime(LocalDateTime.now())
                             .updateTime(LocalDateTime.now())
                             .build();
-                    specKeyMapper.insert(existKey);
+                    specValueMapper.insert(valEntity);
                 }
-                keyId = existKey.getId();
-                keyName = existKey.getName();
-            } else if (keyId != null && !StringUtils.hasText(keyName)) {
-                SpecKey keyEntity = specKeyMapper.selectById(keyId);
-                if (keyEntity != null) {
-                    keyName = keyEntity.getName();
+
+                Long valId = valEntity.getId();
+                Long relCount = spuSpecRelationMapper.selectCount(new LambdaQueryWrapper<SpuSpecRelation>()
+                        .eq(SpuSpecRelation::getSpuId, spuId)
+                        .eq(SpuSpecRelation::getSpecKeyId, keyId)
+                        .eq(SpuSpecRelation::getSpecValueId, valId));
+                if (relCount == 0) {
+                    SpuSpecRelation relation = SpuSpecRelation.builder()
+                            .spuId(spuId)
+                            .specKeyId(keyId)
+                            .specValueId(valId)
+                            .createTime(LocalDateTime.now())
+                            .build();
+                    spuSpecRelationMapper.insert(relation);
                 }
+
+                valueVOs.add(SpecValueVO.fromEntity(valEntity));
             }
 
-            if (keyId == null) {
-                continue;
-            }
-
-            List<SpecValueVO> valueVOs = new ArrayList<>();
-            Set<Long> processedValIds = new HashSet<>();
-
-            // 1. 处理传入的 specValueIds
-            if (!CollectionUtils.isEmpty(item.getSpecValueIds())) {
-                for (Long valId : item.getSpecValueIds()) {
-                    if (valId == null || !processedValIds.add(valId)) {
-                        continue;
-                    }
-                    Long relCount = spuSpecRelationMapper.selectCount(new LambdaQueryWrapper<SpuSpecRelation>()
-                            .eq(SpuSpecRelation::getSpuId, spuId)
-                            .eq(SpuSpecRelation::getSpecKeyId, keyId)
-                            .eq(SpuSpecRelation::getSpecValueId, valId));
-                    if (relCount == 0) {
-                        SpuSpecRelation relation = SpuSpecRelation.builder()
-                                .spuId(spuId)
-                                .specKeyId(keyId)
-                                .specValueId(valId)
-                                .createTime(LocalDateTime.now())
-                                .build();
-                        spuSpecRelationMapper.insert(relation);
-                    }
-
-                    SpecValue valEntity = specValueMapper.selectById(valId);
-                    if (valEntity != null) {
-                        valueVOs.add(SpecValueVO.fromEntity(valEntity));
-                    }
-                }
-            }
-
-            // 2. 处理传入的文本规格值 specValues
-            if (!CollectionUtils.isEmpty(item.getSpecValues())) {
-                for (String valStr : item.getSpecValues()) {
-                    if (!StringUtils.hasText(valStr)) {
-                        continue;
-                    }
-                    String trimmed = valStr.trim();
-                    SpecValue existVal = specValueMapper.selectOne(new LambdaQueryWrapper<SpecValue>()
-                            .eq(SpecValue::getSpecKeyId, keyId)
-                            .eq(SpecValue::getValue, trimmed)
-                            .last("LIMIT 1"));
-                    if (existVal == null) {
-                        existVal = SpecValue.builder()
-                                .specKeyId(keyId)
-                                .value(trimmed)
-                                .sort(0)
-                                .status(1)
-                                .createTime(LocalDateTime.now())
-                                .updateTime(LocalDateTime.now())
-                                .build();
-                        specValueMapper.insert(existVal);
-                    }
-
-                    Long valId = existVal.getId();
-                    if (valId != null && processedValIds.add(valId)) {
-                        Long relCount = spuSpecRelationMapper.selectCount(new LambdaQueryWrapper<SpuSpecRelation>()
-                                .eq(SpuSpecRelation::getSpuId, spuId)
-                                .eq(SpuSpecRelation::getSpecKeyId, keyId)
-                                .eq(SpuSpecRelation::getSpecValueId, valId));
-                        if (relCount == 0) {
-                            SpuSpecRelation rel = SpuSpecRelation.builder()
-                                    .spuId(spuId)
-                                    .specKeyId(keyId)
-                                    .specValueId(valId)
-                                    .createTime(LocalDateTime.now())
-                                    .build();
-                            spuSpecRelationMapper.insert(rel);
-                        }
-                        valueVOs.add(SpecValueVO.fromEntity(existVal));
-                    }
-                }
-            }
+            valueVOs.sort(Comparator.comparing(SpecValueVO::getSort, Comparator.nullsLast(Comparator.naturalOrder()))
+                    .thenComparing(SpecValueVO::getId, Comparator.nullsLast(Comparator.naturalOrder())));
 
             resultList.add(SpuSpecVO.builder()
                     .specKeyId(keyId)
@@ -873,12 +854,15 @@ public class SpuServiceImpl extends ServiceImpl<SpuMapper, Spu> implements SpuSe
     }
 
     /**
-     * 将 SPU 关联表数据组装为结构化规格列表 (支持从 SKU 规格绑定反向兜底)
+     * 将 SPU 关联表数据组装为结构化规格列表 (支持从 SKU 规格绑定及 SKU specData 动态融合与自愈)
      */
     private List<SpuSpecVO> assembleSpuSpecs(List<SpuSpecRelation> relations, Long spuId) {
+        Map<Long, KeyHolder> keyHolderMap = new LinkedHashMap<>();
+
+        // 1. 先从已有的 pms_spu_spec_relation 中提取规格信息
         if (!CollectionUtils.isEmpty(relations)) {
-            Set<Long> keyIds = relations.stream().map(SpuSpecRelation::getSpecKeyId).collect(Collectors.toSet());
-            Set<Long> valueIds = relations.stream().map(SpuSpecRelation::getSpecValueId).collect(Collectors.toSet());
+            Set<Long> keyIds = relations.stream().map(SpuSpecRelation::getSpecKeyId).filter(Objects::nonNull).collect(Collectors.toSet());
+            Set<Long> valueIds = relations.stream().map(SpuSpecRelation::getSpecValueId).filter(Objects::nonNull).collect(Collectors.toSet());
 
             Map<Long, SpecKey> keyMap = new HashMap<>();
             if (!keyIds.isEmpty()) {
@@ -896,77 +880,336 @@ public class SpuServiceImpl extends ServiceImpl<SpuMapper, Spu> implements SpuSe
                 }
             }
 
-            Map<Long, List<SpuSpecRelation>> groupByKey = relations.stream()
-                    .collect(Collectors.groupingBy(SpuSpecRelation::getSpecKeyId, LinkedHashMap::new, Collectors.toList()));
-
-            List<SpuSpecVO> list = new ArrayList<>();
-            for (Map.Entry<Long, List<SpuSpecRelation>> entry : groupByKey.entrySet()) {
-                Long keyId = entry.getKey();
+            for (SpuSpecRelation rel : relations) {
+                Long keyId = rel.getSpecKeyId();
+                Long valId = rel.getSpecValueId();
+                if (keyId == null || valId == null) {
+                    continue;
+                }
                 SpecKey key = keyMap.get(keyId);
                 String keyName = key != null ? key.getName() : "";
-
-                List<SpecValueVO> valVOs = new ArrayList<>();
-                for (SpuSpecRelation rel : entry.getValue()) {
-                    SpecValue v = valMap.get(rel.getSpecValueId());
-                    if (v != null) {
-                        valVOs.add(SpecValueVO.fromEntity(v));
-                    }
+                KeyHolder holder = keyHolderMap.computeIfAbsent(keyId, k -> new KeyHolder(k, ""));
+                if (StringUtils.hasText(keyName) && !StringUtils.hasText(holder.keyName)) {
+                    holder.keyName = keyName;
                 }
 
-                list.add(SpuSpecVO.builder()
-                        .specKeyId(keyId)
-                        .specName(keyName)
-                        .values(valVOs)
-                        .build());
+                SpecValue val = valMap.get(valId);
+                if (val != null && StringUtils.hasText(val.getValue())) {
+                    String vStr = val.getValue().trim();
+                    holder.values.add(vStr);
+                    holder.valueToId.put(vStr, val.getId());
+                }
             }
-
-            return list;
         }
 
-        // 兜底：若关系表为空，但 SPU 下已有 SKU 规格数据，则反向从 pms_sku_spec_value 动态提取聚合
+        // 2. 从 SPU 下的 SKU 规格多对多表 (pms_sku_spec_value) 及 SKU 表 (specData) 中补充和融合规格 (自愈缺失与冲突数据)
         if (spuId != null) {
             List<SkuSpecValue> skuSpecValues = skuSpecValueService.list(new LambdaQueryWrapper<SkuSpecValue>()
                     .eq(SkuSpecValue::getSpuId, spuId)
                     .orderByAsc(SkuSpecValue::getId));
 
             if (!CollectionUtils.isEmpty(skuSpecValues)) {
-                Map<Long, String> keyNameMap = new LinkedHashMap<>();
-                Map<Long, Map<Long, String>> keyValueMap = new LinkedHashMap<>();
-
                 for (SkuSpecValue ssv : skuSpecValues) {
-                    if (ssv.getSpecKeyId() != null && ssv.getSpecValueId() != null) {
-                        keyNameMap.putIfAbsent(ssv.getSpecKeyId(), ssv.getSpecKeyName());
-                        keyValueMap.computeIfAbsent(ssv.getSpecKeyId(), k -> new LinkedHashMap<>())
-                                .putIfAbsent(ssv.getSpecValueId(), ssv.getSpecValue());
+                    if (ssv == null) continue;
+                    Long keyId = ssv.getSpecKeyId();
+                    String keyName = ssv.getSpecKeyName();
+                    if (keyId == null && StringUtils.hasText(keyName)) {
+                        keyId = resolveOrCreateSpecKey(null, keyName, null);
                     }
-                }
+                    if (keyId == null) continue;
 
-                List<SpuSpecVO> list = new ArrayList<>();
-                for (Map.Entry<Long, String> entry : keyNameMap.entrySet()) {
-                    Long kId = entry.getKey();
-                    String kName = entry.getValue();
-                    Map<Long, String> vMap = keyValueMap.getOrDefault(kId, Collections.emptyMap());
-                    List<SpecValueVO> valVOs = new ArrayList<>();
-                    for (Map.Entry<Long, String> vEntry : vMap.entrySet()) {
-                        valVOs.add(SpecValueVO.builder()
-                                .id(vEntry.getKey())
-                                .specKeyId(kId)
-                                .value(vEntry.getValue())
-                                .status(1)
-                                .sort(0)
-                                .build());
+                    KeyHolder holder = keyHolderMap.computeIfAbsent(keyId, k -> new KeyHolder(k, ""));
+                    if (StringUtils.hasText(keyName) && !StringUtils.hasText(holder.keyName)) {
+                        holder.keyName = keyName;
                     }
-                    list.add(SpuSpecVO.builder()
-                            .specKeyId(kId)
-                            .specName(kName)
-                            .values(valVOs)
-                            .build());
+
+                    String valStr = ssv.getSpecValue();
+                    Long valId = ssv.getSpecValueId();
+                    if (StringUtils.hasText(valStr)) {
+                        String trimmed = valStr.trim();
+                        holder.values.add(trimmed);
+                        if (valId != null) {
+                            holder.valueToId.put(trimmed, valId);
+                        }
+                    } else if (valId != null) {
+                        SpecValue valEntity = specValueMapper.selectById(valId);
+                        if (valEntity != null && StringUtils.hasText(valEntity.getValue())) {
+                            String trimmed = valEntity.getValue().trim();
+                            holder.values.add(trimmed);
+                            holder.valueToId.put(trimmed, valEntity.getId());
+                        }
+                    }
                 }
-                return list;
+            }
+
+            // 补充从 SPU 下的 SKU 表的 specData 提取规格 (若 pms_sku_spec_value 遗漏)
+            List<Sku> skus = skuMapper.selectList(new LambdaQueryWrapper<Sku>()
+                    .eq(Sku::getSpuId, spuId)
+                    .orderByAsc(Sku::getId));
+            if (!CollectionUtils.isEmpty(skus)) {
+                for (Sku sku : skus) {
+                    if (StringUtils.hasText(sku.getSpecData())) {
+                        try {
+                            List<SkuSpecValueItemDTO> jsonItems = OBJECT_MAPPER.readValue(
+                                    sku.getSpecData(),
+                                    OBJECT_MAPPER.getTypeFactory().constructCollectionType(List.class, SkuSpecValueItemDTO.class)
+                            );
+                            if (!CollectionUtils.isEmpty(jsonItems)) {
+                                for (SkuSpecValueItemDTO sv : jsonItems) {
+                                    if (sv == null) continue;
+                                    Long keyId = sv.getSpecKeyId();
+                                    String keyName = sv.getSpecKeyName();
+                                    if (keyId == null && StringUtils.hasText(keyName)) {
+                                        keyId = resolveOrCreateSpecKey(null, keyName, null);
+                                    }
+                                    if (keyId == null) continue;
+
+                                    KeyHolder holder = keyHolderMap.computeIfAbsent(keyId, k -> new KeyHolder(k, ""));
+                                    if (StringUtils.hasText(keyName) && !StringUtils.hasText(holder.keyName)) {
+                                        holder.keyName = keyName;
+                                    }
+
+                                    String valStr = sv.getSpecValue();
+                                    Long valId = sv.getSpecValueId();
+                                    if (StringUtils.hasText(valStr)) {
+                                        String trimmed = valStr.trim();
+                                        holder.values.add(trimmed);
+                                        if (valId != null) {
+                                            holder.valueToId.put(trimmed, valId);
+                                        }
+                                    } else if (valId != null) {
+                                        SpecValue valEntity = specValueMapper.selectById(valId);
+                                        if (valEntity != null && StringUtils.hasText(valEntity.getValue())) {
+                                            String trimmed = valEntity.getValue().trim();
+                                            holder.values.add(trimmed);
+                                            holder.valueToId.put(trimmed, valEntity.getId());
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (Exception ignored) {
+                        }
+                    }
+                }
             }
         }
 
-        return Collections.emptyList();
+        if (keyHolderMap.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        // 3. 构建结构化规格列表，并自愈 pms_spu_spec_relation 和 pms_sku_spec_value 中的异常数据
+        List<SpuSpecVO> resultList = new ArrayList<>();
+        Map<String, Long> textToResolvedValId = new HashMap<>();
+
+        for (KeyHolder holder : keyHolderMap.values()) {
+            Long keyId = holder.keyId;
+            String keyName = holder.keyName;
+            if (!StringUtils.hasText(keyName)) {
+                SpecKey k = specKeyMapper.selectById(keyId);
+                keyName = k != null ? k.getName() : "";
+            }
+
+            List<SpecValueVO> valueVOs = new ArrayList<>();
+            for (String valStr : holder.values) {
+                Long candidateId = holder.valueToId.get(valStr);
+                SpecValue valEntity = null;
+                if (candidateId != null) {
+                    SpecValue existing = specValueMapper.selectById(candidateId);
+                    if (existing != null && Objects.equals(existing.getSpecKeyId(), keyId)
+                            && valStr.equalsIgnoreCase(existing.getValue().trim())) {
+                        valEntity = existing;
+                    }
+                }
+                if (valEntity == null) {
+                    valEntity = specValueMapper.selectOne(new LambdaQueryWrapper<SpecValue>()
+                            .eq(SpecValue::getSpecKeyId, keyId)
+                            .eq(SpecValue::getValue, valStr)
+                            .last("LIMIT 1"));
+                }
+                if (valEntity == null) {
+                    valEntity = SpecValue.builder()
+                            .specKeyId(keyId)
+                            .value(valStr)
+                            .sort(0)
+                            .status(1)
+                            .createTime(LocalDateTime.now())
+                            .updateTime(LocalDateTime.now())
+                            .build();
+                    specValueMapper.insert(valEntity);
+                }
+
+                Long realValId = valEntity.getId();
+                textToResolvedValId.put(keyId + "_" + valStr.toLowerCase(), realValId);
+
+                // 自愈补全 pms_spu_spec_relation
+                if (spuId != null) {
+                    Long relCount = spuSpecRelationMapper.selectCount(new LambdaQueryWrapper<SpuSpecRelation>()
+                            .eq(SpuSpecRelation::getSpuId, spuId)
+                            .eq(SpuSpecRelation::getSpecKeyId, keyId)
+                            .eq(SpuSpecRelation::getSpecValueId, realValId));
+                    if (relCount == 0) {
+                        SpuSpecRelation rel = SpuSpecRelation.builder()
+                                .spuId(spuId)
+                                .specKeyId(keyId)
+                                .specValueId(realValId)
+                                .createTime(LocalDateTime.now())
+                                .build();
+                        spuSpecRelationMapper.insert(rel);
+                    }
+                }
+
+                valueVOs.add(SpecValueVO.fromEntity(valEntity));
+            }
+
+            // 按 sort 和 id 排序
+            valueVOs.sort(Comparator.comparing(SpecValueVO::getSort, Comparator.nullsLast(Comparator.naturalOrder()))
+                    .thenComparing(SpecValueVO::getId, Comparator.nullsLast(Comparator.naturalOrder())));
+
+            resultList.add(SpuSpecVO.builder()
+                    .specKeyId(keyId)
+                    .specName(keyName)
+                    .values(valueVOs)
+                    .build());
+        }
+
+        // 4. 自愈修正 pms_sku_spec_value 中 ID 错位的记录
+        if (spuId != null && !textToResolvedValId.isEmpty()) {
+            List<SkuSpecValue> skuSpecValues = skuSpecValueService.list(new LambdaQueryWrapper<SkuSpecValue>()
+                    .eq(SkuSpecValue::getSpuId, spuId));
+            if (!CollectionUtils.isEmpty(skuSpecValues)) {
+                for (SkuSpecValue ssv : skuSpecValues) {
+                    if (ssv.getSpecKeyId() != null && StringUtils.hasText(ssv.getSpecValue())) {
+                        String key = ssv.getSpecKeyId() + "_" + ssv.getSpecValue().trim().toLowerCase();
+                        Long correctValId = textToResolvedValId.get(key);
+                        if (correctValId != null && !correctValId.equals(ssv.getSpecValueId())) {
+                            ssv.setSpecValueId(correctValId);
+                            skuSpecValueService.updateById(ssv);
+                        }
+                    }
+                }
+            }
+        }
+
+        return resultList;
+    }
+
+    private Long resolveOrCreateSpecKey(Long keyId, String keyName, Long categoryId) {
+        if (keyId != null) {
+            SpecKey key = specKeyMapper.selectById(keyId);
+            if (key != null) {
+                return key.getId();
+            }
+        }
+        if (StringUtils.hasText(keyName)) {
+            String trimmedName = keyName.trim();
+            SpecKey existKey = specKeyMapper.selectOne(new LambdaQueryWrapper<SpecKey>()
+                    .eq(categoryId != null && categoryId > 0, SpecKey::getCategoryId, categoryId)
+                    .eq(SpecKey::getName, trimmedName)
+                    .last("LIMIT 1"));
+            if (existKey == null) {
+                existKey = specKeyMapper.selectOne(new LambdaQueryWrapper<SpecKey>()
+                        .eq(SpecKey::getCategoryId, 0)
+                        .eq(SpecKey::getName, trimmedName)
+                        .last("LIMIT 1"));
+            }
+            if (existKey == null) {
+                existKey = SpecKey.builder()
+                        .categoryId(categoryId != null ? categoryId : 0L)
+                        .name(trimmedName)
+                        .sort(0)
+                        .status(1)
+                        .createTime(LocalDateTime.now())
+                        .updateTime(LocalDateTime.now())
+                        .build();
+                specKeyMapper.insert(existKey);
+            }
+            return existKey.getId();
+        }
+        return null;
+    }
+
+    private static class KeyHolder {
+        Long keyId;
+        String keyName;
+        LinkedHashSet<String> values = new LinkedHashSet<>();
+        Map<String, Long> valueToId = new HashMap<>();
+
+        KeyHolder(Long keyId, String keyName) {
+            this.keyId = keyId;
+            this.keyName = keyName;
+        }
+    }
+
+    /**
+     * 校验 SKU 列表中的规格组合唯一性 (同一 SPU 下不得存在重复规格维度的 SKU)
+     */
+    private void validateSkuSpecifications(Long spuId, List<SkuItemDTO> skuList) {
+        if (CollectionUtils.isEmpty(skuList)) {
+            return;
+        }
+
+        // 1. 校验请求内部各 SKU 规格组合是否唯一
+        Map<String, SkuItemDTO> requestSpecMap = new LinkedHashMap<>();
+        Set<String> requestSkuCodes = new HashSet<>();
+
+        for (SkuItemDTO skuDTO : skuList) {
+            if (skuDTO == null) continue;
+
+            if (StringUtils.hasText(skuDTO.getSkuCode())) {
+                String code = skuDTO.getSkuCode().trim().toLowerCase();
+                if (!requestSkuCodes.add(code)) {
+                    throw new BusinessException(ResultCode.SKU_CODE_EXISTS, "请求中存在重复的SKU编码: " + skuDTO.getSkuCode());
+                }
+            }
+
+            SkuSpecUtils.SpecSignature sig = SkuSpecUtils.extractSignature(
+                    skuDTO.getSpecValues(),
+                    skuDTO.getSpecData(),
+                    specKeyMapper,
+                    specValueMapper
+            );
+            if (sig != null && !sig.isEmpty()) {
+                if (requestSpecMap.containsKey(sig.getSignature())) {
+                    SkuItemDTO firstSku = requestSpecMap.get(sig.getSignature());
+                    throw new BusinessException(ResultCode.VALIDATE_FAILED,
+                            "SKU规格已存在或重复，不允许提交相同规格: " + sig.getReadableDesc()
+                                    + (StringUtils.hasText(firstSku.getSkuCode()) ? " (与SKU " + firstSku.getSkuCode() + " 冲突)" : ""));
+                }
+                requestSpecMap.put(sig.getSignature(), skuDTO);
+            }
+        }
+
+        // 2. 若是修改 SPU (spuId != null)，还需要对比库中已有且未被本次更新覆盖的旧 SKU 规格
+        if (spuId != null && !requestSpecMap.isEmpty()) {
+            List<Sku> dbSkus = skuMapper.selectList(new LambdaQueryWrapper<Sku>().eq(Sku::getSpuId, spuId));
+            if (!CollectionUtils.isEmpty(dbSkus)) {
+                // 找到请求中包含的所有已有 SKU ID
+                Set<Long> updatingSkuIds = skuList.stream()
+                        .map(SkuItemDTO::getId)
+                        .filter(Objects::nonNull)
+                        .collect(Collectors.toSet());
+
+                // 筛选出库中未在本次请求中被覆盖或更新的旧 SKU
+                List<Sku> unupdatedDbSkus = dbSkus.stream()
+                        .filter(dbSku -> !updatingSkuIds.contains(dbSku.getId()))
+                        .collect(Collectors.toList());
+
+                if (!unupdatedDbSkus.isEmpty()) {
+                    List<Long> unupdatedDbSkuIds = unupdatedDbSkus.stream().map(Sku::getId).collect(Collectors.toList());
+                    Map<Long, List<SkuSpecValueVO>> dbSkuSpecMap = skuSpecValueService.mapBySkuIds(unupdatedDbSkuIds);
+                    for (Map.Entry<String, SkuItemDTO> entry : requestSpecMap.entrySet()) {
+                        SkuSpecUtils.SpecSignature reqSig = SkuSpecUtils.extractSignature(
+                                entry.getValue().getSpecValues(),
+                                entry.getValue().getSpecData(),
+                                specKeyMapper,
+                                specValueMapper
+                        );
+                        SkuSpecUtils.checkDuplicateSpecWithExisting(reqSig, unupdatedDbSkus, dbSkuSpecMap, specKeyMapper, specValueMapper);
+                    }
+                }
+            }
+        }
     }
 
     private String generateSpuCode() {

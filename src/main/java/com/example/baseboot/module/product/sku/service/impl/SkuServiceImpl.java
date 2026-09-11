@@ -15,6 +15,9 @@ import com.example.baseboot.module.product.spec.vo.SkuSpecValueVO;
 import com.example.baseboot.module.product.spu.entity.Spu;
 import com.example.baseboot.module.product.spu.mapper.SpuMapper;
 import com.example.baseboot.module.product.spu.service.SpuService;
+import com.example.baseboot.module.product.spec.mapper.SpecKeyMapper;
+import com.example.baseboot.module.product.spec.mapper.SpecValueMapper;
+import com.example.baseboot.module.product.spec.util.SkuSpecUtils;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -41,6 +44,8 @@ public class SkuServiceImpl extends ServiceImpl<SkuMapper, Sku> implements SkuSe
     private final SpuService spuService;
     private final SpuMapper spuMapper;
     private final SkuSpecValueService skuSpecValueService;
+    private final SpecKeyMapper specKeyMapper;
+    private final SpecValueMapper specValueMapper;
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
@@ -70,6 +75,22 @@ public class SkuServiceImpl extends ServiceImpl<SkuMapper, Sku> implements SkuSe
             try {
                 specData = OBJECT_MAPPER.writeValueAsString(skuDTO.getSpecValues());
             } catch (Exception ignored) {
+            }
+        }
+
+        // 校验同 SPU 下是否存在重复规格
+        SkuSpecUtils.SpecSignature targetSig = SkuSpecUtils.extractSignature(
+                skuDTO.getSpecValues(),
+                skuDTO.getSpecData(),
+                specKeyMapper,
+                specValueMapper
+        );
+        if (!targetSig.isEmpty()) {
+            List<Sku> dbSkus = this.list(new LambdaQueryWrapper<Sku>().eq(Sku::getSpuId, spuId));
+            if (!CollectionUtils.isEmpty(dbSkus)) {
+                List<Long> dbSkuIds = dbSkus.stream().map(Sku::getId).collect(Collectors.toList());
+                Map<Long, List<SkuSpecValueVO>> dbSpecMap = skuSpecValueService.mapBySkuIds(dbSkuIds);
+                SkuSpecUtils.checkDuplicateSpecWithExisting(targetSig, dbSkus, dbSpecMap, specKeyMapper, specValueMapper);
             }
         }
 
@@ -125,6 +146,24 @@ public class SkuServiceImpl extends ServiceImpl<SkuMapper, Sku> implements SkuSe
                     throw new BusinessException(ResultCode.SKU_CODE_EXISTS);
                 }
                 sku.setSkuCode(newCode);
+            }
+        }
+
+        // 校验修改后的规格在同 SPU 下是否与其它已有 SKU 冲突
+        SkuSpecUtils.SpecSignature updateSig = SkuSpecUtils.extractSignature(
+                updateDTO.getSpecValues(),
+                updateDTO.getSpecData(),
+                specKeyMapper,
+                specValueMapper
+        );
+        if (!updateSig.isEmpty()) {
+            List<Sku> otherSkus = this.list(new LambdaQueryWrapper<Sku>()
+                    .eq(Sku::getSpuId, sku.getSpuId())
+                    .ne(Sku::getId, id));
+            if (!CollectionUtils.isEmpty(otherSkus)) {
+                List<Long> otherSkuIds = otherSkus.stream().map(Sku::getId).collect(Collectors.toList());
+                Map<Long, List<SkuSpecValueVO>> otherSpecMap = skuSpecValueService.mapBySkuIds(otherSkuIds);
+                SkuSpecUtils.checkDuplicateSpecWithExisting(updateSig, otherSkus, otherSpecMap, specKeyMapper, specValueMapper);
             }
         }
 

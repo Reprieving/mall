@@ -87,26 +87,38 @@ public class SkuSpecValueServiceImpl extends ServiceImpl<SkuSpecValueMapper, Sku
                 continue;
             }
 
-            // 2. 若未传 specValueId 但传了文本，自动按值检索或新建 SpecValue
-            if (valueId == null && StringUtils.hasText(val)) {
-                SpecValue existVal = specValueMapper.selectOne(new LambdaQueryWrapper<SpecValue>()
-                        .eq(SpecValue::getSpecKeyId, keyId)
-                        .eq(SpecValue::getValue, val.trim())
-                        .last("LIMIT 1"));
-                if (existVal == null) {
-                    existVal = SpecValue.builder()
-                            .specKeyId(keyId)
-                            .value(val.trim())
-                            .sort(0)
-                            .status(1)
-                            .createTime(LocalDateTime.now())
-                            .updateTime(LocalDateTime.now())
-                            .build();
-                    specValueMapper.insert(existVal);
+            // 2. 规格值校验与解析：确保 valueId 与文本 val 精准匹配，杜绝前端传入的虚拟/重复 ID 导致映射错乱
+            if (StringUtils.hasText(val)) {
+                String trimmedVal = val.trim();
+                boolean needLookup = true;
+                if (valueId != null) {
+                    SpecValue valueEntity = specValueMapper.selectById(valueId);
+                    if (valueEntity != null && Objects.equals(valueEntity.getSpecKeyId(), keyId)
+                            && trimmedVal.equalsIgnoreCase(valueEntity.getValue().trim())) {
+                        needLookup = false;
+                        val = valueEntity.getValue();
+                    }
                 }
-                valueId = existVal.getId();
-                val = existVal.getValue();
-            } else if (valueId != null && !StringUtils.hasText(val)) {
+                if (needLookup) {
+                    SpecValue existVal = specValueMapper.selectOne(new LambdaQueryWrapper<SpecValue>()
+                            .eq(SpecValue::getSpecKeyId, keyId)
+                            .eq(SpecValue::getValue, trimmedVal)
+                            .last("LIMIT 1"));
+                    if (existVal == null) {
+                        existVal = SpecValue.builder()
+                                .specKeyId(keyId)
+                                .value(trimmedVal)
+                                .sort(0)
+                                .status(1)
+                                .createTime(LocalDateTime.now())
+                                .updateTime(LocalDateTime.now())
+                                .build();
+                        specValueMapper.insert(existVal);
+                    }
+                    valueId = existVal.getId();
+                    val = existVal.getValue();
+                }
+            } else if (valueId != null) {
                 SpecValue valueEntity = specValueMapper.selectById(valueId);
                 val = valueEntity != null ? valueEntity.getValue() : "";
             }

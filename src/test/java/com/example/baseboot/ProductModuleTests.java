@@ -2,9 +2,12 @@ package com.example.baseboot;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.baseboot.common.api.CommonPage;
+import com.example.baseboot.common.api.ResultCode;
+import com.example.baseboot.common.exception.BusinessException;
 import com.example.baseboot.module.product.category.entity.Category;
 import com.example.baseboot.module.product.category.vo.CategoryTreeVO;
 import com.example.baseboot.module.product.sku.dto.SkuItemDTO;
+import com.example.baseboot.module.product.sku.entity.Sku;
 import com.example.baseboot.module.product.spec.dto.SkuSpecValueItemDTO;
 import com.example.baseboot.module.product.spec.entity.SkuSpecValue;
 import com.example.baseboot.module.product.spec.entity.SpecKey;
@@ -223,5 +226,192 @@ class ProductModuleTests {
         Assertions.assertEquals(2, sku11Specs.size());
         Assertions.assertEquals("颜色", sku11Specs.get(0).getSpecKeyName());
         Assertions.assertEquals("尺码", sku11Specs.get(1).getSpecKeyName());
+    }
+
+    @Test
+    void testSpuSpecMatrixDeduplicationAndUnion() {
+        // 模拟 SPU3 场景：已有规格选用关系只有 经典黑(1) 与 L(101)
+        // 但 6 个 SKU 涵盖了 经典黑、象牙白 以及 M、L、XL，且部分带有重复/虚拟 specValueId
+        List<SkuSpecValue> skuSpecValues = Arrays.asList(
+                // SKU 1: 经典黑 + M
+                SkuSpecValue.builder().skuId(1L).spuId(3L).specKeyId(1L).specKeyName("颜色").specValueId(1L).specValue("经典黑").build(),
+                SkuSpecValue.builder().skuId(1L).spuId(3L).specKeyId(2L).specKeyName("尺码").specValueId(101L).specValue("M").build(),
+                // SKU 2: 经典黑 + L
+                SkuSpecValue.builder().skuId(2L).spuId(3L).specKeyId(1L).specKeyName("颜色").specValueId(1L).specValue("经典黑").build(),
+                SkuSpecValue.builder().skuId(2L).spuId(3L).specKeyId(2L).specKeyName("尺码").specValueId(101L).specValue("L").build(),
+                // SKU 3: 经典黑 + XL
+                SkuSpecValue.builder().skuId(3L).spuId(3L).specKeyId(1L).specKeyName("颜色").specValueId(1L).specValue("经典黑").build(),
+                SkuSpecValue.builder().skuId(3L).spuId(3L).specKeyId(2L).specKeyName("尺码").specValueId(101L).specValue("XL").build(),
+                // SKU 4: 象牙白 + M
+                SkuSpecValue.builder().skuId(4L).spuId(3L).specKeyId(1L).specKeyName("颜色").specValueId(1L).specValue("象牙白").build(),
+                SkuSpecValue.builder().skuId(4L).spuId(3L).specKeyId(2L).specKeyName("尺码").specValueId(101L).specValue("M").build(),
+                // SKU 5: 象牙白 + L
+                SkuSpecValue.builder().skuId(5L).spuId(3L).specKeyId(1L).specKeyName("颜色").specValueId(1L).specValue("象牙白").build(),
+                SkuSpecValue.builder().skuId(5L).spuId(3L).specKeyId(2L).specKeyName("尺码").specValueId(101L).specValue("L").build(),
+                // SKU 6: 象牙白 + XL
+                SkuSpecValue.builder().skuId(6L).spuId(3L).specKeyId(1L).specKeyName("颜色").specValueId(1L).specValue("象牙白").build(),
+                SkuSpecValue.builder().skuId(6L).spuId(3L).specKeyId(2L).specKeyName("尺码").specValueId(101L).specValue("XL").build()
+        );
+
+        // 基于文本维度的聚合算法验证 (杜绝旧实现按 specValueId putIfAbsent 导致的值被吞)
+        Map<Long, String> keyNameMap = new LinkedHashMap<>();
+        Map<Long, Set<String>> keyValueSetMap = new LinkedHashMap<>();
+
+        for (SkuSpecValue ssv : skuSpecValues) {
+            if (ssv.getSpecKeyId() != null && ssv.getSpecValue() != null) {
+                keyNameMap.putIfAbsent(ssv.getSpecKeyId(), ssv.getSpecKeyName());
+                keyValueSetMap.computeIfAbsent(ssv.getSpecKeyId(), k -> new LinkedHashSet<>())
+                        .add(ssv.getSpecValue().trim());
+            }
+        }
+
+        Assertions.assertEquals(2, keyNameMap.size());
+        Assertions.assertEquals("颜色", keyNameMap.get(1L));
+        Assertions.assertEquals("尺码", keyNameMap.get(2L));
+
+        Set<String> colorValues = keyValueSetMap.get(1L);
+        Assertions.assertEquals(2, colorValues.size(), "颜色应包含 经典黑 与 象牙白 2种取值");
+        Assertions.assertTrue(colorValues.contains("经典黑"));
+        Assertions.assertTrue(colorValues.contains("象牙白"));
+
+        Set<String> sizeValues = keyValueSetMap.get(2L);
+        Assertions.assertEquals(3, sizeValues.size(), "尺码应包含 M、L、XL 3种取值");
+        Assertions.assertTrue(sizeValues.contains("M"));
+        Assertions.assertTrue(sizeValues.contains("L"));
+        Assertions.assertTrue(sizeValues.contains("XL"));
+    }
+
+    @Test
+    void testOrderIndependentSkuSpecSignature() {
+        // SKU A: 颜色 先，尺码 后
+        List<SkuSpecValueItemDTO> specsA = Arrays.asList(
+                SkuSpecValueItemDTO.builder().specKeyName("颜色").specValue("经典黑").build(),
+                SkuSpecValueItemDTO.builder().specKeyName("尺码").specValue("L").build()
+        );
+
+        // SKU B: 尺码 先，颜色 后
+        List<SkuSpecValueItemDTO> specsB = Arrays.asList(
+                SkuSpecValueItemDTO.builder().specKeyName("尺码").specValue("L").build(),
+                SkuSpecValueItemDTO.builder().specKeyName("颜色").specValue("经典黑").build()
+        );
+
+        // 提取排序后签名
+        Map<String, String> mapA = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+        for (SkuSpecValueItemDTO item : specsA) {
+            mapA.put(item.getSpecKeyName().trim(), item.getSpecValue().trim());
+        }
+
+        Map<String, String> mapB = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+        for (SkuSpecValueItemDTO item : specsB) {
+            mapB.put(item.getSpecKeyName().trim(), item.getSpecValue().trim());
+        }
+
+        StringBuilder sigA = new StringBuilder();
+        mapA.forEach((k, v) -> sigA.append(k.toLowerCase()).append(":").append(v.toLowerCase()).append(";"));
+
+        StringBuilder sigB = new StringBuilder();
+        mapB.forEach((k, v) -> sigB.append(k.toLowerCase()).append(":").append(v.toLowerCase()).append(";"));
+
+        Assertions.assertEquals(sigA.toString(), sigB.toString(), "不同顺序的规格维度应生成完全一致的签名");
+        Assertions.assertEquals("尺码:l;颜色:经典黑;", sigA.toString());
+    }
+
+    @Test
+    void testDuplicateSkuSpecificationDetectionInUpdate() {
+        // 模拟 SPU 提交包含重复规格组合的 SKU 列表
+        List<SkuItemDTO> incomingSkus = Arrays.asList(
+                SkuItemDTO.builder().skuCode("SKU001").specValues(Arrays.asList(
+                        SkuSpecValueItemDTO.builder().specKeyName("颜色").specValue("经典黑").build(),
+                        SkuSpecValueItemDTO.builder().specKeyName("尺码").specValue("L").build()
+                )).build(),
+                SkuItemDTO.builder().skuCode("SKU002").specValues(Arrays.asList(
+                        SkuSpecValueItemDTO.builder().specKeyName("尺码").specValue("L").build(),
+                        SkuSpecValueItemDTO.builder().specKeyName("颜色").specValue("经典黑").build()
+                )).build()
+        );
+
+        Map<String, String> seenSignatures = new HashMap<>();
+        boolean duplicateDetected = false;
+        String duplicatedDesc = "";
+
+        for (SkuItemDTO sku : incomingSkus) {
+            Map<String, String> map = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+            for (SkuSpecValueItemDTO sv : sku.getSpecValues()) {
+                map.put(sv.getSpecKeyName().trim(), sv.getSpecValue().trim());
+            }
+            StringBuilder sig = new StringBuilder();
+            StringBuilder desc = new StringBuilder();
+            map.forEach((k, v) -> {
+                sig.append(k.toLowerCase()).append(":").append(v.toLowerCase()).append(";");
+                desc.append(k).append(": ").append(v).append(", ");
+            });
+            if (seenSignatures.containsKey(sig.toString())) {
+                duplicateDetected = true;
+                duplicatedDesc = desc.toString();
+                break;
+            }
+            seenSignatures.put(sig.toString(), sku.getSkuCode());
+        }
+
+        Assertions.assertTrue(duplicateDetected, "应当检测到重复的规格组合并拦截");
+        Assertions.assertTrue(duplicatedDesc.contains("颜色: 经典黑") && duplicatedDesc.contains("尺码: L"));
+    }
+
+    @Test
+    void testSkuSpecUtilsExtractSignatureAndDuplicateDetection() {
+        // 1. 测试从纯文本 specData 中提取签名
+        String textSpecData = "机身颜色:经典黑;存储容量:M";
+        com.example.baseboot.module.product.spec.util.SkuSpecUtils.SpecSignature sig1 =
+                com.example.baseboot.module.product.spec.util.SkuSpecUtils.extractSignature(null, textSpecData, null, null);
+        Assertions.assertFalse(sig1.isEmpty());
+        Assertions.assertEquals("存储容量:m;机身颜色:经典黑", sig1.getSignature());
+
+        // 2. 测试从 SkuSpecValueItemDTO 列表中提取签名 (无视字段顺序与大小写)
+        List<SkuSpecValueItemDTO> dtoList = Arrays.asList(
+                SkuSpecValueItemDTO.builder().specKeyName("存储容量").specValue("m").build(),
+                SkuSpecValueItemDTO.builder().specKeyName("机身颜色").specValue("经典黑").build()
+        );
+        com.example.baseboot.module.product.spec.util.SkuSpecUtils.SpecSignature sig2 =
+                com.example.baseboot.module.product.spec.util.SkuSpecUtils.extractSignature(dtoList, null, null, null);
+        Assertions.assertEquals(sig1.getSignature(), sig2.getSignature(), "相同规格维度不论输入格式或大小写，签名必须一致");
+
+        // 3. 测试与同 SPU 已有 SKU 冲突校验
+        Sku existingSku = Sku.builder().id(11L).spuId(3L).skuCode("SPU394629-01").name("经典黑 / M").build();
+        List<SkuSpecValueVO> existingVOs = Arrays.asList(
+                SkuSpecValueVO.builder().specKeyName("机身颜色").specValue("经典黑").build(),
+                SkuSpecValueVO.builder().specKeyName("存储容量").specValue("M").build()
+        );
+        Map<Long, List<SkuSpecValueVO>> specMap = Collections.singletonMap(11L, existingVOs);
+
+        // 尝试更新/新增 SKU 为相同规格组合 -> 必须抛出 BusinessException
+        BusinessException ex = Assertions.assertThrows(BusinessException.class, () -> {
+            com.example.baseboot.module.product.spec.util.SkuSpecUtils.checkDuplicateSpecWithExisting(
+                    sig2,
+                    Collections.singletonList(existingSku),
+                    specMap,
+                    null,
+                    null
+            );
+        });
+        Assertions.assertEquals(ResultCode.VALIDATE_FAILED.getCode(), ex.getCode());
+        Assertions.assertTrue(ex.getMessage().contains("当前商品已存在相同的SKU规格"));
+        Assertions.assertTrue(ex.getMessage().contains("SPU394629-01"));
+
+        // 4. 不同规格的 SKU -> 不冲突
+        List<SkuSpecValueItemDTO> differentDtoList = Arrays.asList(
+                SkuSpecValueItemDTO.builder().specKeyName("机身颜色").specValue("经典黑").build(),
+                SkuSpecValueItemDTO.builder().specKeyName("存储容量").specValue("256GB").build()
+        );
+        com.example.baseboot.module.product.spec.util.SkuSpecUtils.SpecSignature diffSig =
+                com.example.baseboot.module.product.spec.util.SkuSpecUtils.extractSignature(differentDtoList, null, null, null);
+        Assertions.assertDoesNotThrow(() -> {
+            com.example.baseboot.module.product.spec.util.SkuSpecUtils.checkDuplicateSpecWithExisting(
+                    diffSig,
+                    Collections.singletonList(existingSku),
+                    specMap,
+                    null,
+                    null
+            );
+        });
     }
 }
