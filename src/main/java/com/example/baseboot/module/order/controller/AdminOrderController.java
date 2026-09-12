@@ -7,10 +7,15 @@ import com.example.baseboot.common.api.CommonPage;
 import com.example.baseboot.common.api.CommonResult;
 import com.example.baseboot.common.api.ResultCode;
 import com.example.baseboot.common.exception.BusinessException;
+import com.example.baseboot.common.context.AdminContext;
 import com.example.baseboot.module.order.dto.OrderAdminQueryDTO;
 import com.example.baseboot.module.order.dto.OrderAdminRemarkDTO;
+import com.example.baseboot.module.order.dto.OrderRefundAuditDTO;
+import com.example.baseboot.module.order.dto.OrderRefundQueryDTO;
+import com.example.baseboot.module.order.service.OrderRefundService;
 import com.example.baseboot.module.order.vo.OrderAdminDetailVO;
 import com.example.baseboot.module.order.vo.OrderLogVO;
+import com.example.baseboot.module.order.vo.OrderRefundVO;
 import com.example.baseboot.module.order.entity.Order;
 import com.example.baseboot.module.order.entity.OrderItem;
 import com.example.baseboot.module.order.mapper.OrderItemMapper;
@@ -51,6 +56,7 @@ public class AdminOrderController {
     private final SysUserMapper sysUserMapper;
     private final SpuMapper spuMapper;
     private final ShopMapper shopMapper;
+    private final OrderRefundService orderRefundService;
 
     /**
      * 全平台跨店铺订单多维组合高级检索
@@ -160,15 +166,71 @@ public class AdminOrderController {
         // 构建流转时间轴
         List<OrderLogVO> timeline = buildOrderTimeline(order);
 
+        // 获取最新退款记录
+        OrderRefundVO refundVO = orderRefundService.getRefundByOrderId(id);
+
         OrderAdminDetailVO detailVO = OrderAdminDetailVO.builder()
                 .orderInfo(OrderVO.fromEntity(order))
                 .items(itemVOs)
                 .buyer(UserVO.fromEntity(buyer))
                 .shop(ShopVO.fromEntity(shop))
                 .timeline(timeline)
+                .refundInfo(refundVO)
                 .build();
 
         return CommonResult.success(detailVO);
+    }
+
+    /**
+     * 审批订单退款申请 (基于退款记录ID)
+     */
+    @Operation(summary = "审批订单退款申请", description = "运营管理员或店铺卖家审批退款申请，同意则退回库存并关闭订单，驳回则记录驳回原因")
+    @PostMapping("/refund/{id}/audit")
+    @RequirePermission
+    public CommonResult<OrderRefundVO> auditRefund(@PathVariable("id") Long id,
+                                                   @Valid @RequestBody OrderRefundAuditDTO auditDTO) {
+        AdminContext.AdminUserContextInfo adminInfo = AdminContext.get();
+        Long adminId = adminInfo != null ? adminInfo.getAdminId() : null;
+        String adminName = adminInfo != null ? adminInfo.getUsername() : "运营审核员";
+        OrderRefundVO vo = orderRefundService.auditRefund(adminId, adminName, id, auditDTO);
+        return CommonResult.success(vo, auditDTO.getStatus() == 1 ? "退款申请已同意" : "退款申请已驳回");
+    }
+
+    /**
+     * 审批订单退款申请 (基于订单ID)
+     */
+    @Operation(summary = "根据订单ID审批退款申请", description = "快捷根据订单主键ID审批其关联的最新待处理退款申请")
+    @PostMapping("/{id}/refund/audit")
+    @RequirePermission
+    public CommonResult<OrderRefundVO> auditRefundByOrderId(@PathVariable("id") Long id,
+                                                            @Valid @RequestBody OrderRefundAuditDTO auditDTO) {
+        AdminContext.AdminUserContextInfo adminInfo = AdminContext.get();
+        Long adminId = adminInfo != null ? adminInfo.getAdminId() : null;
+        String adminName = adminInfo != null ? adminInfo.getUsername() : "运营审核员";
+        OrderRefundVO vo = orderRefundService.auditRefundByOrderId(adminId, adminName, id, auditDTO);
+        return CommonResult.success(vo, auditDTO.getStatus() == 1 ? "退款申请已同意" : "退款申请已驳回");
+    }
+
+    /**
+     * 查询指定订单的退款记录
+     */
+    @Operation(summary = "查询订单退款记录", description = "管理端查看指定订单的历史退款申请与审批明细")
+    @GetMapping("/{id}/refund")
+    @RequirePermission("order:view")
+    public CommonResult<OrderRefundVO> getAdminOrderRefund(@PathVariable("id") Long id) {
+        OrderRefundVO vo = orderRefundService.getRefundByOrderId(id);
+        return CommonResult.success(vo);
+    }
+
+    /**
+     * 分页检索全平台退款申请列表
+     */
+    @Operation(summary = "全平台退款申请分页检索", description = "按退款状态、退款单号、关联订单号等多条件分页检索全量退款记录")
+    @GetMapping("/refund/page")
+    @RequirePermission("order:view")
+    public CommonResult<CommonPage<OrderRefundVO>> pageRefunds(OrderRefundQueryDTO queryDTO) {
+        CommonPage<OrderRefundVO> page = orderRefundService.pageRefunds(queryDTO);
+        return CommonResult.success(page);
     }
 
     /**
@@ -260,12 +322,34 @@ public class AdminOrderController {
                     .build());
         }
 
+        // 退款申请与审批流转事件
+        OrderRefundVO refund = orderRefundService.getRefundByOrderId(order.getId());
+        if (refund != null) {
+            if (refund.getCreateTime() != null) {
+                logs.add(OrderLogVO.builder()
+                        .time(refund.getCreateTime())
+                        .action("买家申请退款")
+                        .operator("买家")
+                        .detail("退款单号: " + refund.getRefundSn() + "，申请金额: ￥" + refund.getRefundAmount() + "，原因: " + refund.getReason())
+                        .build());
+            }
+            if (refund.getAuditTime() != null) {
+                boolean passed = refund.getStatus() != null && refund.getStatus() == 1;
+                logs.add(OrderLogVO.builder()
+                        .time(refund.getAuditTime())
+                        .action(passed ? "退款申请审核通过" : "退款申请已驳回")
+                        .operator(StringUtils.hasText(refund.getAuditUserName()) ? refund.getAuditUserName() : "店铺卖家 / 运营")
+                        .detail(passed ? "同意退款并关闭订单" : "驳回原因: " + refund.getAuditRemark())
+                        .build());
+            }
+        }
+
         if (order.getCancelTime() != null) {
             logs.add(OrderLogVO.builder()
                     .time(order.getCancelTime())
-                    .action("订单已取消")
+                    .action("订单已取消/关闭")
                     .operator("买家 / 运营强制关闭")
-                    .detail("取消原因: " + (order.getCancelReason() != null ? order.getCancelReason() : "无"))
+                    .detail("关闭/取消原因: " + (order.getCancelReason() != null ? order.getCancelReason() : "无"))
                     .build());
         }
 

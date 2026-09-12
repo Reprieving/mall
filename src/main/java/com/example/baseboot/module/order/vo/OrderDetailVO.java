@@ -30,4 +30,9 @@ public class OrderDetailVO implements Serializable {
      */
     @Builder.Default
     private List<OrderItemVO> items = new ArrayList<>();
+
+    /**
+     * 最新退款申请与审批记录 (若无则为 null)
+     */
+    private OrderRefundVO refundInfo;
 }

@@ -5,9 +5,11 @@ import com.example.baseboot.common.api.CommonPage;
 import com.example.baseboot.common.api.CommonResult;
 import com.example.baseboot.common.context.UserContext;
 import com.example.baseboot.module.order.dto.*;
+import com.example.baseboot.module.order.service.OrderRefundService;
 import com.example.baseboot.module.order.service.OrderService;
 import com.example.baseboot.module.order.vo.OrderDetailVO;
 import com.example.baseboot.module.order.vo.OrderPreviewVO;
+import com.example.baseboot.module.order.vo.OrderRefundVO;
 import com.example.baseboot.module.order.vo.OrderVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -26,6 +28,7 @@ import org.springframework.web.bind.annotation.*;
 public class OrderController {
 
     private final OrderService orderService;
+    private final OrderRefundService orderRefundService;
 
     /**
      * 订单结算预览 (核算金额、运费与商品可售性)
@@ -101,12 +104,37 @@ public class OrderController {
     /**
      * 获取订单详情
      */
-    @Operation(summary = "查询买家订单详情", description = "获取指定订单的详细条目、收货地址与状态")
+    @Operation(summary = "查询买家订单详情", description = "获取指定订单的详细条目、收货地址、状态与退款进展")
     @GetMapping("/{id}")
     public CommonResult<OrderDetailVO> getOrderDetail(@PathVariable("id") Long id) {
         Long userId = UserContext.getUserId();
         OrderDetailVO detailVO = orderService.getOrderDetail(userId, id, false);
+        if (detailVO != null) {
+            detailVO.setRefundInfo(orderRefundService.getRefundByOrderId(id));
+        }
         return CommonResult.success(detailVO);
+    }
+
+    /**
+     * 买家发起订单退款申请
+     */
+    @Operation(summary = "买家申请订单退款", description = "提交退款/退货申请并生成待审核退款记录，等待店铺卖家审批")
+    @PostMapping("/{id}/refund")
+    public CommonResult<OrderRefundVO> applyRefund(@PathVariable("id") Long id,
+                                                   @Valid @RequestBody OrderRefundApplyDTO applyDTO) {
+        Long userId = UserContext.getUserId();
+        OrderRefundVO refundVO = orderRefundService.applyRefund(userId, id, applyDTO);
+        return CommonResult.success(refundVO, "退款申请提交成功，请等待卖家审批");
+    }
+
+    /**
+     * 买家查询订单退款记录
+     */
+    @Operation(summary = "买家查询订单退款记录", description = "查询指定订单当前的退款申请状态与审批结果")
+    @GetMapping("/{id}/refund")
+    public CommonResult<OrderRefundVO> getOrderRefund(@PathVariable("id") Long id) {
+        OrderRefundVO refundVO = orderRefundService.getRefundByOrderId(id);
+        return CommonResult.success(refundVO);
     }
 
     /**

@@ -47,4 +47,9 @@ public class OrderAdminDetailVO implements Serializable {
      * 订单全流程流转时间轴日志
      */
     private List<OrderLogVO> timeline;
+
+    /**
+     * 最新退款申请与审批记录 (若无则为 null)
+     */
+    private OrderRefundVO refundInfo;
 }
